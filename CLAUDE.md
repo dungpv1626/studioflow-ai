@@ -17,20 +17,25 @@ Hệ thống AI Agent thay thế phòng Marketing/Truyền thông và Phân tíc
 
 ## Trạng thái dự án (cập nhật 2026-04-29)
 
-### ✅ Đã hoàn thành
+### ✅ Đã hoàn thành & hoạt động ổn định
 
 | Hạng mục | Trạng thái | Ghi chú |
 |---|---|---|
-| **Streamlit Web UI** (`app.py`) | ✅ Hoạt động | 6 tabs: Orchestrator, Content, KOL, Business Analyst, Image, Brand Assets |
-| **LLM Backend** (`llm_client.py`) | ✅ Hoạt động | Gemini 2.5 Flash qua OpenAI-compatible endpoint, retry + fallback |
-| **Content Agent** (`agents/content_agent.py`) | ✅ Hoạt động | Tạo bài viết + ảnh trong cùng 1 lần chạy, progress callback realtime |
-| **KOL Agent** (`agents/kol_agent.py`) | ✅ Hoạt động | Kịch bản TikTok/Live/YouTube, brief, outreach |
-| **Business Analyst Agent** | ✅ Hoạt động | Phân tích đối thủ, chiến lược, thị trường |
-| **Orchestrator** (`agents/orchestrator.py`) | ✅ Hoạt động | Tự phân công task cho agent phù hợp |
-| **Kie AI Image Generation** | ✅ Hoạt động | Async polling, model `nano-banana-2`, 6 presets |
-| **Logo Overlay** (`skills/brand_assets.py`) | ✅ Hoạt động | Tự động ghép logo removed-background vào góc dưới phải ảnh |
-| **Brand Assets Manager** | ✅ Hoạt động | Tab Brand Assets, preview ảnh, kiểm tra file còn thiếu |
-| **Content Writing Skills** | ✅ Hoạt động | Facebook post, blog SEO, email, ad copy, content calendar |
+| **Streamlit Web UI** (`app.py`) | ✅ Production | 6 tabs, auth login, secrets bridge, download button |
+| **LLM Backend** (`llm_client.py`) | ✅ Production | Gemini 2.5 Flash, retry 3 lần, fallback gemini-2.5-pro |
+| **Streamlit Cloud Deploy** | ✅ Production | GitHub repo `dungpv1626/studioflow-ai`, auto-deploy |
+| **Content Agent** (`agents/content_agent.py`) | ✅ Production | Trả tuple `(text, images_list)`, Phase 2 fallback tự tạo ảnh |
+| **KOL Agent** (`agents/kol_agent.py`) | ✅ Production | Kịch bản TikTok/Live/YouTube, brief, outreach |
+| **Business Analyst Agent** | ✅ Production | Phân tích đối thủ, chiến lược, thị trường |
+| **Orchestrator** (`agents/orchestrator.py`) | ✅ Production | Tự phân công task cho agent phù hợp |
+| **Kie AI Image Generation** | ✅ Production | Async polling, model `nano-banana-2`, 6 presets, lưu absolute path |
+| **Logo Overlay** | ✅ Production | Dùng `logo_primary` (có nền xanh lá), logo_ratio=0.28, luôn hiển thị |
+| **Caption tiếng Việt** | ✅ Production | NotoSans tự download, dải xanh Studio Flow phía dưới ảnh |
+| **Image bytes in memory** | ✅ Production | Ảnh lưu vào RAM, `st.image(bytes)` không phụ thuộc filesystem |
+| **Download button** | ✅ Production | Mỗi ảnh có nút ⬇️ tải về máy |
+| **Token overflow fix** | ✅ Production | Trim messages giữ task gốc + 6 messages gần nhất |
+| **Brand Assets Manager** | ✅ Production | Tab Brand Assets, preview ảnh, kiểm tra file còn thiếu |
+| **Content Writing Skills** | ✅ Production | Facebook post, blog SEO, email, ad copy, content calendar |
 
 ### ⚠️ Chưa test đầy đủ / cần kiểm tra thêm
 
@@ -39,43 +44,47 @@ Hệ thống AI Agent thay thế phòng Marketing/Truyền thông và Phân tíc
 | **KOL Agent + Image** | ⚠️ Chưa test | Kiểm tra KOL agent có gọi generate_image không |
 | **Orchestrator multi-agent** | ⚠️ Chưa test | Test task phức tạp yêu cầu nhiều agent phối hợp |
 | **Web Scraping** (`skills/web_scraping.py`) | ⚠️ Chưa test | Cần kiểm tra Apify token còn hạn không |
-| **Brand Assets đầy đủ** | ⚠️ Chỉ có logo | Còn thiếu templates và infographics |
+| **Caption font trên Cloud** | ⚠️ Chưa confirm | NotoSans tự download lần đầu — cần test internet access trên Streamlit Cloud |
+| **Templates & Infographics** | ⚠️ File sai | Thư mục có file hash-name (không dùng được), chưa có template đúng format |
 
 ### ❌ Không triển khai (theo quyết định)
 
 | Hạng mục | Lý do |
 |---|---|
-| **Anthropic API** | User chọn Gemini (miễn phí, có free tier) |
+| **Anthropic Claude API** | User chọn Gemini (miễn phí, có free tier) |
 | **Pollinations.AI** | User chọn Kie AI (chất lượng hơn, phù hợp marketing) |
+| **Kie AI img2img cho logo** | Logo overlay bằng Pillow đảm bảo logo chính xác 100%, không phụ thuộc AI hallucination |
 
 ---
 
 ## Kiến trúc hệ thống
 
 ```
-app.py                           ← Streamlit Web UI (6 tabs)
+app.py                           ← Streamlit Web UI (6 tabs + auth + secrets bridge)
 ├── agents/
-│   ├── orchestrator.py          ← AI Marketing Director
-│   ├── content_agent.py         ← Tạo nội dung + ảnh (có logo)
-│   ├── kol_agent.py             ← Kịch bản & chiến lược KOL
-│   └── business_analyst_agent.py ← Phân tích kinh doanh
+│   ├── orchestrator.py          ← AI Marketing Director (MAX_ITERATIONS=10)
+│   ├── content_agent.py         ← Tạo nội dung + ảnh, trả (text, images) tuple
+│   ├── kol_agent.py             ← Kịch bản & chiến lược KOL (MAX_ITERATIONS=10)
+│   └── business_analyst_agent.py ← Phân tích kinh doanh (MAX_ITERATIONS=10)
 ├── skills/
 │   ├── content_writing.py       ← Viết nội dung (Facebook, blog, email, ads)
-│   ├── image_generation.py      ← Kie AI + tự động overlay logo
-│   ├── brand_assets.py          ← Quản lý logo/template/infographic
+│   ├── image_generation.py      ← Kie AI + overlay logo, lưu absolute path
+│   ├── brand_assets.py          ← overlay_logo(), add_caption(), NotoSans font
 │   ├── kol_koc_scripts.py       ← Kịch bản KOL/KOC
 │   ├── web_scraping.py          ← Thu thập dữ liệu (Apify)
 │   └── market_analysis.py       ← Phân tích thị trường
 ├── assets/
 │   ├── logo/
-│   │   ├── Studioflow -Logo.png
-│   │   └── Studioflow-logo - BG- removed.png   ← Dùng để overlay
-│   ├── templates/               ← Chưa có file
-│   └── infographics/            ← Chưa có file
+│   │   ├── Studioflow -Logo.png               ← Logo CHÍNH dùng overlay (nền xanh lá)
+│   │   └── Studioflow-logo - BG- removed.png  ← Logo trắng trên nền trong (ít dùng)
+│   ├── fonts/                   ← NotoSans tự download vào đây lần đầu
+│   ├── templates/               ← Chưa có file đúng format
+│   └── infographics/            ← Chưa có file đúng format
 ├── llm_client.py                ← Gemini adapter (tương thích Anthropic SDK)
 ├── config.py                    ← Cấu hình & business context
-├── output/                      ← Ảnh generate lưu tại đây
-├── .env                         ← API keys (KHÔNG commit)
+├── output/                      ← Ảnh generate lưu tại đây (gitignored)
+├── .env                         ← API keys local (KHÔNG commit)
+├── .streamlit/secrets.toml      ← API keys Streamlit Cloud (KHÔNG commit)
 └── requirements.txt
 ```
 
@@ -96,12 +105,24 @@ python test_agent.py
 
 ---
 
-## API Keys (.env)
+## API Keys
 
+### Local (`.env`)
 ```env
 GEMINI_API_KEY=...          # LLM chính — Google AI Studio (miễn phí)
 KIE_AI_API_KEY=...          # Tạo ảnh — Kie AI nano-banana-2
 APIFY_API_TOKEN=...         # Web scraping — Apify
+```
+
+### Streamlit Cloud (`.streamlit/secrets.toml` — KHÔNG commit)
+```toml
+[api_keys]
+GEMINI_API_KEY = "..."
+KIE_AI_API_KEY = "..."
+APIFY_API_TOKEN = "..."
+
+[auth]
+password = "studioflow2025"
 ```
 
 ---
@@ -118,36 +139,51 @@ APIFY_API_TOKEN=...         # Web scraping — Apify
 **Quyết định:** Dùng Kie AI `nano-banana-2` model  
 **Lý do:** Chất lượng ảnh phù hợp marketing chuyên nghiệp hơn Pollinations  
 **Cách thực hiện:** Async polling — POST `/api/v1/jobs/createTask` → poll GET `/api/v1/jobs/recordInfo?taskId=...` mỗi 4 giây, timeout 180 giây  
-**Lưu ý quan trọng:** `output_format` không được truyền vào payload — API báo lỗi 500 nếu có field này.
+**Lưu ý quan trọng:** `output_format` KHÔNG được truyền vào payload — API báo lỗi 500 nếu có field này.
 
-### 3. Logo overlay bằng Pillow (không dùng Kie AI img2img)
-**Quyết định:** Download ảnh về local, dùng Pillow composite logo lên ảnh  
-**Lý do:** Đơn giản, không tốn API call thêm, logo luôn đúng 100% thương hiệu  
-**Cách thực hiện:** `skills/brand_assets.py::overlay_logo()` — dùng `logo_nobg` (removed background), paste vào góc dưới phải, logo chiếm 22% chiều rộng ảnh  
-**File logo:** `assets/logo/Studioflow-logo - BG- removed.png`
+### 3. Logo overlay bằng Pillow — dùng logo_primary (có nền)
+**Quyết định:** Download ảnh về local, dùng Pillow composite logo lên ảnh. Dùng `logo_primary` (`Studioflow -Logo.png`) thay vì `logo_nobg`.  
+**Lý do:** `logo_nobg` có nội dung màu TRẮNG trên nền trong suốt → vô hình trên ảnh sáng màu. `logo_primary` (nền xanh lá gradient) luôn hiển thị rõ trên mọi loại ảnh.  
+**Lý do không dùng Kie AI img2img:** Pillow đảm bảo logo chính xác 100%, không bị AI biến thể/hallucinate  
+**Cách thực hiện:** `overlay_logo()` — ưu tiên `logo_primary`, logo_ratio=0.28 (28% chiều rộng), góc dưới phải. Nếu chỉ có `logo_nobg` thì tự thêm backing màu xanh Studio Flow phía sau.
 
-### 4. Content Agent trả về `(text, images)` tuple
+### 4. Image bytes lưu trong RAM, không dùng file path
+**Quyết định:** Đọc bytes ảnh ngay sau khi generate, lưu trong `collected_images` 4-tuple  
+**Lý do:** Path relative gây lỗi trên Streamlit Cloud — CWD khác nhau giữa image_generation.py và app.py. Bytes trong RAM không phụ thuộc filesystem.  
+**Cách thực hiện:** `_read_img_bytes(local_path)` trong content_agent.py → `collected_images` lưu `(preset, local_path, image_url, img_bytes)` → app.py dùng `st.image(img_bytes)` và `st.download_button(data=img_bytes)`
+
+### 5. Content Agent trả về `(text, images)` tuple
 **Quyết định:** `run_content_agent()` trả `tuple[str, list]` thay vì `str`  
-**Lý do:** Gemini không đáng tin cậy trong việc tự include image URL vào final text — thu thập URL trực tiếp từ tool results đảm bảo ảnh luôn xuất hiện  
-**Cách thực hiện:** `collected_images: list[(preset, path)]` track trong vòng lặp, app.py render bằng `st.image()` thay vì markdown
+**Lý do:** Gemini không đáng tin cậy trong việc tự include image URL vào final text — thu thập images trực tiếp từ tool results đảm bảo ảnh luôn có  
+**Phase 2 fallback:** Nếu Gemini không gọi generate_image trong agentic loop → tự động tạo ảnh dựa trên keyword trong task (không cần LLM)
 
-### 5. Streamlit Web UI thay vì CLI
-**Quyết định:** Giao diện web thay vì chạy Python script  
-**Lý do:** User cần giao diện dễ dùng, không cần biết code  
-**Cách thực hiện:** `app.py` — 6 tabs, progress callback realtime, download kết quả, preview ảnh
+### 6. Token overflow prevention — trim message history
+**Quyết định:** Giữ task gốc + tối đa 6 messages gần nhất, truncate tool result ≤ 2000 ký tự  
+**Lý do:** Gemini giới hạn 1,048,576 tokens. Mỗi vòng lặp agent append assistant + tool_results vào messages. Task nhiều bài viết (3-5 posts + ảnh) dễ vượt giới hạn.  
+**Áp dụng:** Tất cả 4 agents. Orchestrator và KOL/BA agent còn được đổi từ `while True` → `MAX_ITERATIONS=10`.
+
+### 7. Phụ đề tiếng Việt qua Pillow (không qua Kie AI prompt)
+**Quyết định:** Dùng NotoSans font + Pillow ImageDraw để in text tiếng Việt lên ảnh  
+**Lý do:** Kie AI không render được tiếng Việt có dấu qua text prompt  
+**Cách thực hiện:** `add_caption()` trong `brand_assets.py` — tự download NotoSans-Regular.ttf từ GitHub lần đầu, lưu vào `assets/fonts/`. Vẽ dải nền xanh Studio Flow (#0f2044, opacity 220) phía dưới ảnh, chữ trắng căn giữa.
+
+### 8. Streamlit Community Cloud (không dùng server riêng)
+**Quyết định:** Deploy lên Streamlit Cloud miễn phí, kết nối GitHub repo  
+**Lý do:** Nhân viên có thể dùng từ bất kỳ máy nào qua browser, không cần setup  
+**Cách thực hiện:** GitHub repo private → Streamlit Cloud → secrets qua UI (không commit). `_load_secrets()` trong app.py bridge `st.secrets` → `os.environ` cho các module downstream.
 
 ---
 
 ## Bước tiếp theo (ưu tiên cao → thấp)
 
 ### 🔴 Ưu tiên cao
-1. **Upload templates và infographics** vào `assets/templates/` và `assets/infographics/` — hiện chỉ có logo
-2. **Test KOL Agent + image** — kiểm tra kịch bản TikTok có kèm ảnh generated không
-3. **Test Orchestrator** với task phức tạp (ví dụ: "Chuẩn bị content tuần này + brief KOL")
+1. **Upload templates đúng format** vào `assets/templates/` — hiện có file hash-name không dùng được. Cần: `facebook_post.png` (1080×1080), `facebook_story.png` (1080×1920), `hero_banner.png` (1920×600)
+2. **Test caption tiếng Việt trên Streamlit Cloud** — NotoSans tự download từ GitHub, cần verify có internet access và không bị timeout
+3. **Test KOL Agent + image** — thêm generate_image tool vào KOL Agent (hiện chưa có)
 
 ### 🟡 Ưu tiên trung bình
-4. **Tích hợp templates vào image pipeline** — thay vì chỉ overlay logo, có thể overlay nội dung text lên template có sẵn bằng Pillow
-5. **Thêm image vào KOL Agent** — tương tự Content Agent, KOL Agent cũng nên generate ảnh kèm kịch bản
+4. **Lưu ảnh lâu dài** — hiện tại ảnh mất khi Streamlit Cloud restart. Cần tích hợp lưu lên Google Drive hoặc Cloudinary để lưu trữ lịch sử
+5. **Tích hợp templates vào image pipeline** — overlay nội dung text lên template có sẵn bằng Pillow (thay vì chỉ generate AI + logo)
 6. **Kiểm tra web scraping** — chạy thử `find_photography_studios_vietnam("TP.HCM")` với Apify token hiện tại
 
 ### 🟢 Ưu tiên thấp (Roadmap)
@@ -169,20 +205,21 @@ APIFY_API_TOKEN=...         # Web scraping — Apify
 | `write_email_campaign(type, segment)` | `skills/content_writing.py` | JSON |
 | `write_ad_copy(platform, objective)` | `skills/content_writing.py` | JSON |
 | `generate_content_calendar(month)` | `skills/content_writing.py` | String |
-| `generate_marketing_image(prompt)` | `skills/image_generation.py` | dict (có logo) |
-| `generate_preset_image(preset_key)` | `skills/image_generation.py` | dict (có logo) |
+| `generate_marketing_image(prompt)` | `skills/image_generation.py` | dict với logo |
+| `generate_preset_image(preset_key)` | `skills/image_generation.py` | dict với logo |
 | `overlay_logo(base, output)` | `skills/brand_assets.py` | path string |
+| `add_caption(image, text, output)` | `skills/brand_assets.py` | path string |
 
 ### Image Presets (Kie AI)
 
 ```python
 IMAGE_PRESETS = {
-    "hero_banner"      # Banner trang chủ 16:9
-    "feature_invoice"  # Tính năng hóa đơn 1:1
-    "feature_calendar" # Tính năng lịch hẹn 1:1
-    "kol_product"      # KOL cầm điện thoại 9:16
-    "social_post"      # Social post 1:1
-    "testimonial_bg"   # Background testimonial 16:9
+    "hero_banner":      # Banner trang chủ 16:9
+    "feature_invoice":  # Tính năng hóa đơn 1:1
+    "feature_calendar": # Tính năng lịch hẹn 1:1
+    "kol_product":      # KOL cầm điện thoại 9:16
+    "social_post":      # Social post 1:1
+    "testimonial_bg":   # Background testimonial 16:9
 }
 ```
 
@@ -198,14 +235,17 @@ IMAGE_PRESETS = {
 
 ---
 
-## Lưu ý kỹ thuật
+## Lưu ý kỹ thuật quan trọng
 
-- **KHÔNG commit `.env`** — chứa API keys thật
-- **Asyncio trong Streamlit**: dùng `_run_async()` trong `content_agent.py` thay vì `asyncio.run()` trực tiếp — tránh conflict event loop
-- **Agentic loop**: giới hạn `MAX_ITERATIONS = 15` để tránh vòng lặp vô tận
-- **Gemini 503**: retry 3 lần với 3s sleep, fallback sang `gemini-2.5-pro`
-- **Ảnh output**: lưu tại `output/gen_<taskId[:8]>.jpg`, đã có logo overlay
-- **Logo file names có dấu cách**: `Studioflow -Logo.png` và `Studioflow-logo - BG- removed.png` — không đổi tên để khớp với `brand_assets.py`
+- **KHÔNG commit `.env` và `.streamlit/secrets.toml`** — chứa API keys thật
+- **Logo file có dấu cách:** `Studioflow -Logo.png` và `Studioflow-logo - BG- removed.png` — không đổi tên
+- **Logo_nobg = trắng vô hình:** File BG-removed có logo trắng trên nền trong → vô hình trên ảnh sáng. Luôn dùng `logo_primary` cho overlay.
+- **Absolute path cho output:** `_OUTPUT_DIR = Path(__file__).parent.parent / "output"` trong `image_generation.py` — không dùng path relative
+- **Asyncio trong Streamlit:** dùng `_run_async()` với `ThreadPoolExecutor` thay vì `asyncio.run()` — tránh conflict event loop
+- **Gemini 503:** retry 3 lần với 3s sleep, fallback sang `gemini-2.5-pro`
+- **Token limit Gemini:** 1,048,576 tokens — trim messages mỗi iteration, truncate tool results ≤ 2000 ký tự
+- **output/ gitignored:** Ảnh generate không commit lên git — mất khi Streamlit Cloud restart
+- **NotoSans font:** Tự download từ GitHub khi lần đầu gọi `add_caption()`, lưu tại `assets/fonts/NotoSans-Regular.ttf`
 
 ---
 
