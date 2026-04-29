@@ -237,7 +237,7 @@ Quy tắc:
     # Lấy text cuối cùng từ agent
     agent_summary = ""
     for block in response.content:
-        if hasattr(block, "text"):
+        if hasattr(block, "text") and block.text:
             agent_summary += block.text
 
     # Tổng hợp output đầy đủ từ tất cả plan_results
