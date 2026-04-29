@@ -252,26 +252,29 @@ def overlay_logo(
     base_image_path: str,
     output_path: str,
     position: str = "bottom-right",
-    logo_ratio: float = 0.22,
-    padding: int = 24,
+    logo_ratio: float = 0.28,
+    padding: int = 20,
 ) -> str:
     """
-    Ghép logo Studio Flow (removed background) lên ảnh nền.
+    Ghép logo Studio Flow lên ảnh nền.
+    Ưu tiên dùng logo có nền (logo_primary). Nếu chỉ có logo_nobg thì
+    tự thêm backing màu thương hiệu để logo luôn hiển thị rõ.
 
     Args:
-        base_image_path: Đường dẫn ảnh gốc (đã download về local)
+        base_image_path: Đường dẫn ảnh gốc
         output_path: Đường dẫn file output
         position: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'center'
-        logo_ratio: Logo chiếm bao nhiêu % chiều rộng ảnh (0.22 = 22%)
+        logo_ratio: Logo chiếm bao nhiêu % chiều rộng ảnh (0.28 = 28%)
         padding: Khoảng cách từ mép ảnh (pixels)
     Returns:
         output_path nếu thành công
     """
-    from PIL import Image
+    from PIL import Image, ImageDraw
 
-    logo_path = get_asset_path("logo_nobg")
+    # Ưu tiên logo có nền (màu xanh Studio Flow)
+    logo_path = get_asset_path("logo_primary") or get_asset_path("logo_nobg")
     if not logo_path:
-        raise FileNotFoundError("Chưa có file logo_nobg. Upload 'Studioflow-logo - BG- removed.png' vào assets/logo/")
+        raise FileNotFoundError("Không tìm thấy logo. Kiểm tra thư mục assets/logo/")
 
     base = Image.open(base_image_path).convert("RGBA")
     logo = Image.open(logo_path).convert("RGBA")
@@ -284,16 +287,29 @@ def overlay_logo(
     # Tính vị trí
     bw, bh = base.size
     lw, lh = logo.size
+    inner_pad = 10  # padding bên trong backing box
     positions = {
-        "bottom-right": (bw - lw - padding, bh - lh - padding),
-        "bottom-left":  (padding, bh - lh - padding),
-        "top-right":    (bw - lw - padding, padding),
-        "top-left":     (padding, padding),
+        "bottom-right": (bw - lw - padding - inner_pad, bh - lh - padding - inner_pad),
+        "bottom-left":  (padding + inner_pad, bh - lh - padding - inner_pad),
+        "top-right":    (bw - lw - padding - inner_pad, padding + inner_pad),
+        "top-left":     (padding + inner_pad, padding + inner_pad),
         "center":       ((bw - lw) // 2, (bh - lh) // 2),
     }
     x, y = positions.get(position, positions["bottom-right"])
 
-    # Composite
+    # Kiểm tra logo có nền thật hay không (logo_nobg = trắng trên trong suốt)
+    # → nếu không có nền, thêm backing màu thương hiệu để logo luôn thấy
+    is_nobg = "nobg" in str(logo_path).lower() or "bg" in str(logo_path).lower()
+    if is_nobg:
+        # Vẽ backing hình chữ nhật bo góc, màu xanh Studio Flow
+        backing_layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+        bd = ImageDraw.Draw(backing_layer)
+        bx0, by0 = x - inner_pad, y - inner_pad
+        bx1, by1 = x + lw + inner_pad, y + lh + inner_pad
+        bd.rounded_rectangle([bx0, by0, bx1, by1], radius=10, fill=(15, 32, 68, 210))
+        base = Image.alpha_composite(base, backing_layer)
+
+    # Composite logo
     base.paste(logo, (x, y), mask=logo)
     base.convert("RGB").save(output_path, quality=95)
     return output_path
