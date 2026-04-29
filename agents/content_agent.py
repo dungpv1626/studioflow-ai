@@ -107,6 +107,26 @@ def _read_img_bytes(local_path: str) -> bytes | None:
     return None
 
 
+def _apply_caption_to_bytes(img_bytes: bytes, caption: str) -> bytes:
+    """Thêm phụ đề tiếng Việt lên ảnh (bytes in → bytes out), không cần disk."""
+    try:
+        import io as _io
+        import tempfile, os as _os
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        tmp.write(img_bytes)
+        tmp.close()
+        from skills.brand_assets import add_caption
+        add_caption(tmp.name, caption, tmp.name)
+        with open(tmp.name, "rb") as f:
+            result = f.read()
+        _os.unlink(tmp.name)
+        print(f"[Caption] Thành công: '{caption[:50]}'")
+        return result
+    except Exception as e:
+        print(f"[Caption failed] {e}")
+        return img_bytes  # trả lại ảnh không có caption thay vì crash
+
+
 def _run_async(coro):
     """Chạy coroutine an toàn dù đang trong event loop hay không."""
     import asyncio
@@ -232,31 +252,11 @@ Thứ tự làm việc đúng:
                             # img_bytes đã được overlay logo trong memory bởi image_generation.py
                             img_bytes = img_result.get("img_bytes")
 
-                            # Thêm phụ đề tiếng Việt nếu có (ghi đè lên disk file, rồi đọc lại)
+                            # Thêm phụ đề tiếng Việt nếu có
                             caption = block.input.get("caption", "").strip()
-                            if caption:
-                                try:
-                                    from skills.brand_assets import add_caption
-                                    import io as _io
-                                    if img_bytes:
-                                        # Xử lý caption trong memory
-                                        from PIL import Image as _PImage
-                                        import tempfile, os as _os
-                                        tmp_in = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-                                        tmp_in.write(img_bytes)
-                                        tmp_in.close()
-                                        tmp_out = tmp_in.name
-                                        add_caption(tmp_in.name, caption, tmp_out)
-                                        with open(tmp_out, "rb") as f:
-                                            img_bytes = f.read()
-                                        _os.unlink(tmp_out)
-                                        _log(f"[Tool] Đã thêm phụ đề: {caption[:60]}")
-                                    elif local_path:
-                                        add_caption(local_path, caption, local_path)
-                                        img_bytes = _read_img_bytes(local_path)
-                                        _log(f"[Tool] Đã thêm phụ đề (disk): {caption[:60]}")
-                                except Exception as cap_err:
-                                    _log(f"[Tool] Lỗi add_caption: {cap_err}")
+                            if caption and img_bytes:
+                                img_bytes = _apply_caption_to_bytes(img_bytes, caption)
+                                _log(f"[Tool] Đã thêm phụ đề: {caption[:60]}")
 
                             preset_name = block.input.get("preset") or "custom"
                             if img_bytes or local_path or image_url:
@@ -311,27 +311,8 @@ Thứ tự làm việc đúng:
                 # Phase 2: thêm phụ đề tự động
                 auto_caption = _make_auto_caption(task)
                 if auto_caption and img_bytes:
-                    try:
-                        from skills.brand_assets import add_caption
-                        import tempfile, os as _os
-                        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-                        tmp.write(img_bytes)
-                        tmp.close()
-                        add_caption(tmp.name, auto_caption, tmp.name)
-                        with open(tmp.name, "rb") as f:
-                            img_bytes = f.read()
-                        _os.unlink(tmp.name)
-                        _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
-                    except Exception as cap_err:
-                        _log(f"[Image] Lỗi add_caption: {cap_err}")
-                elif auto_caption and local_path:
-                    try:
-                        from skills.brand_assets import add_caption
-                        add_caption(local_path, auto_caption, local_path)
-                        img_bytes = _read_img_bytes(local_path)
-                        _log(f"[Image] Đã thêm phụ đề (disk): {auto_caption[:60]}")
-                    except Exception as cap_err:
-                        _log(f"[Image] Lỗi add_caption: {cap_err}")
+                    img_bytes = _apply_caption_to_bytes(img_bytes, auto_caption)
+                    _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
 
                 _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0} local={local_path[:60] if local_path else 'EMPTY'}")
                 if img_bytes or local_path or image_url:

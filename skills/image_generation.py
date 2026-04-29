@@ -116,15 +116,23 @@ def _overlay_logo_in_memory(raw_bytes: bytes) -> bytes:
     """Ghép logo Studio Flow lên ảnh hoàn toàn trong bộ nhớ, trả về JPEG bytes."""
     try:
         from PIL import Image, ImageDraw
-        from skills.brand_assets import get_asset_path
 
-        logo_path = get_asset_path("logo_nobg") or get_asset_path("logo_primary")
+        # Tìm logo trực tiếp từ đường dẫn tuyệt đối (không import skills.brand_assets
+        # để tránh lỗi circular import / sys.path trên Streamlit Cloud)
+        _logo_dir = Path(__file__).parent.parent / "assets" / "logo"
+        _candidates = [
+            _logo_dir / "Studioflow-logo - BG- removed.png",  # logo_nobg ưu tiên
+            _logo_dir / "Studioflow -Logo.png",               # logo_primary fallback
+        ]
+        logo_path = next((p for p in _candidates if p.exists()), None)
         if not logo_path:
-            print("[Logo overlay] Không tìm thấy logo, trả ảnh gốc")
+            print(f"[Logo overlay] Không tìm thấy logo trong {_logo_dir}: {list(_logo_dir.iterdir()) if _logo_dir.exists() else 'thư mục không tồn tại'}")
             return raw_bytes
 
+        print(f"[Logo overlay] Dùng logo: {logo_path.name}")
+
         base = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-        logo = Image.open(logo_path).convert("RGBA")
+        logo = Image.open(str(logo_path)).convert("RGBA")
 
         logo_ratio = 0.28
         padding = 20
@@ -153,10 +161,12 @@ def _overlay_logo_in_memory(raw_bytes: bytes) -> bytes:
 
         out = io.BytesIO()
         base.convert("RGB").save(out, format="JPEG", quality=95)
+        print(f"[Logo overlay] Thành công: {len(out.getvalue())} bytes")
         return out.getvalue()
 
     except Exception as e:
-        print(f"[Logo overlay in-memory failed] {e}")
+        import traceback
+        print(f"[Logo overlay in-memory failed] {e}\n{traceback.format_exc()}")
         return raw_bytes
 
 
