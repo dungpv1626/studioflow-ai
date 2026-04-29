@@ -37,7 +37,7 @@ Yêu cầu output:
 Viết đầy đủ, cụ thể từng ngày, không bỏ sót."""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -61,7 +61,7 @@ Output cần có:
 Thực tế, khả thi cho startup SaaS giai đoạn early-growth."""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -88,7 +88,7 @@ Output cần có:
 Focus vào KOL ngành nhiếp ảnh, studio, wedding photography Việt Nam."""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -117,7 +117,7 @@ Output cần có:
 6. **Retargeting plan**: pixel events, custom audiences cần tạo"""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -148,7 +148,7 @@ Output cần có:
 Phù hợp thị trường studio chụp ảnh Việt Nam."""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -179,7 +179,7 @@ Output cần có:
 Thực tế cho team nhỏ (1-3 người) giai đoạn early-stage."""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -210,7 +210,7 @@ Sau bảng, thêm:
 Ngắn gọn, dễ đọc, phù hợp in ra dán tường team."""
     response = _client.messages.create(
         model=config.CLAUDE_DEFAULT_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=CACHED_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )

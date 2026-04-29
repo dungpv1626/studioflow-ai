@@ -218,10 +218,11 @@ Quy tắc:
                     # Chờ ngắn giữa các lần gọi LLM để tránh bị rate limit Gemini
                     _time.sleep(3)
 
-                    # Truncate cho tool_result để tránh token overflow
+                    # Truncate tool_result gửi lại agent (để agent biết đã xong),
+                    # nhưng plan_results lưu full content (không truncate)
                     result_str = full_result
-                    if len(result_str) > 2000:
-                        result_str = result_str[:1900] + "... [xem kết quả đầy đủ bên dưới]"
+                    if len(result_str) > 800:
+                        result_str = result_str[:700] + "... [kết quả đầy đủ đã được lưu]"
 
                     tool_results.append({
                         "type": "tool_result",
