@@ -271,8 +271,9 @@ def overlay_logo(
     """
     from PIL import Image, ImageDraw
 
-    # Ưu tiên logo có nền (màu xanh Studio Flow)
-    logo_path = get_asset_path("logo_primary") or get_asset_path("logo_nobg")
+    # Dùng logo_nobg (logo thương hiệu chính, không có text sự kiện)
+    # Nếu không có → fallback sang logo_primary
+    logo_path = get_asset_path("logo_nobg") or get_asset_path("logo_primary")
     if not logo_path:
         raise FileNotFoundError("Không tìm thấy logo. Kiểm tra thư mục assets/logo/")
 
@@ -284,10 +285,10 @@ def overlay_logo(
     logo_h = int(logo.height * logo_w / logo.width)
     logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
 
-    # Tính vị trí
+    # Tính vị trí (trừ đi inner_pad để có chỗ cho backing)
     bw, bh = base.size
     lw, lh = logo.size
-    inner_pad = 10  # padding bên trong backing box
+    inner_pad = 12
     positions = {
         "bottom-right": (bw - lw - padding - inner_pad, bh - lh - padding - inner_pad),
         "bottom-left":  (padding + inner_pad, bh - lh - padding - inner_pad),
@@ -297,19 +298,20 @@ def overlay_logo(
     }
     x, y = positions.get(position, positions["bottom-right"])
 
-    # Kiểm tra logo có nền thật hay không (logo_nobg = trắng trên trong suốt)
-    # → nếu không có nền, thêm backing màu thương hiệu để logo luôn thấy
-    is_nobg = "nobg" in str(logo_path).lower() or "bg" in str(logo_path).lower()
-    if is_nobg:
-        # Vẽ backing hình chữ nhật bo góc, màu xanh Studio Flow
-        backing_layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
-        bd = ImageDraw.Draw(backing_layer)
-        bx0, by0 = x - inner_pad, y - inner_pad
-        bx1, by1 = x + lw + inner_pad, y + lh + inner_pad
+    # Logo_nobg có nội dung màu TRẮNG trên trong suốt → luôn thêm backing
+    # màu thương hiệu xanh Studio Flow để logo hiển thị rõ trên mọi ảnh
+    backing_layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    bd = ImageDraw.Draw(backing_layer)
+    bx0, by0 = x - inner_pad, y - inner_pad
+    bx1, by1 = x + lw + inner_pad, y + lh + inner_pad
+    try:
         bd.rounded_rectangle([bx0, by0, bx1, by1], radius=10, fill=(15, 32, 68, 210))
-        base = Image.alpha_composite(base, backing_layer)
+    except AttributeError:
+        # Pillow < 9.2 không có rounded_rectangle
+        bd.rectangle([bx0, by0, bx1, by1], fill=(15, 32, 68, 210))
+    base = Image.alpha_composite(base, backing_layer)
 
-    # Composite logo
+    # Composite logo lên backing
     base.paste(logo, (x, y), mask=logo)
     base.convert("RGB").save(output_path, quality=95)
     return output_path

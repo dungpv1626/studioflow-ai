@@ -43,7 +43,9 @@ async def generate_marketing_image(
     Returns:
         dict: image_url, local_path, prompt_used, task_id
     """
-    branded_prompt = f"{prompt}, Studio Flow Vietnam photography management app, professional"
+    # KHÔNG thêm tên thương hiệu vào prompt — tránh AI tự vẽ logo sai
+    # Logo thật được overlay bằng Pillow sau khi generate
+    branded_prompt = f"{prompt}, professional photography studio, Vietnam, high quality"
 
     headers = {
         "Authorization": f"Bearer {KIE_API_KEY}",
@@ -94,13 +96,13 @@ async def generate_marketing_image(
             save_path = str(_OUTPUT_DIR / f"gen_{task_id[:8]}.jpg")
         Path(save_path).write_bytes(r.content)
 
-        # Overlay logo nếu có
+        # Overlay logo Studio Flow
         try:
             from skills.brand_assets import overlay_logo, get_asset_path
-            if get_asset_path("logo_nobg"):
+            if get_asset_path("logo_nobg") or get_asset_path("logo_primary"):
                 overlay_logo(save_path, save_path)
-        except Exception:
-            pass  # Logo chưa upload — bỏ qua, không làm hỏng flow
+        except Exception as _logo_err:
+            print(f"[Logo overlay failed] {_logo_err}")
 
         result["local_path"] = save_path
 
@@ -144,27 +146,27 @@ async def _poll_task(client: httpx.AsyncClient, headers: dict, task_id: str, max
 # ─── Presets ──────────────────────────────────────────────────────────────────
 IMAGE_PRESETS = {
     "hero_banner": {
-        "prompt": "Modern SaaS dashboard on laptop, dark blue theme, Vietnamese wedding photography studio background",
+        "prompt": "Modern SaaS dashboard on laptop, dark blue and cyan theme, Vietnamese wedding photography studio background, no text, no logo",
         "aspect_ratio": "16:9",
     },
     "feature_invoice": {
-        "prompt": "Clean invoice management UI, Vietnamese dong currency, photography business, minimal design",
+        "prompt": "Clean invoice management UI mockup, Vietnamese dong currency symbol, photography business, minimal flat design, no brand logo",
         "aspect_ratio": "1:1",
     },
     "feature_calendar": {
-        "prompt": "Studio appointment calendar interface, colorful schedule blocks, modern SaaS UI",
+        "prompt": "Studio appointment calendar interface mockup, colorful schedule blocks, modern SaaS UI, no text overlay",
         "aspect_ratio": "1:1",
     },
     "kol_product": {
-        "prompt": "Vietnamese photographer using mobile app in professional studio, natural lighting, lifestyle photo",
+        "prompt": "Vietnamese photographer using mobile app in professional studio, natural lighting, lifestyle photo, no text",
         "aspect_ratio": "9:16",
     },
     "social_post": {
-        "prompt": "Dark blue and cyan tech brand logo, photography studio ambiance, modern minimalist",
+        "prompt": "Professional photography studio interior, dark blue accent lighting, camera equipment, cinematic atmosphere, no text no logo",
         "aspect_ratio": "1:1",
     },
     "testimonial_bg": {
-        "prompt": "Happy Vietnamese photographer reviewing analytics on tablet, warm studio lighting, professional",
+        "prompt": "Happy Vietnamese photographer reviewing analytics on tablet, warm studio lighting, professional portrait, no text",
         "aspect_ratio": "16:9",
     },
 }
