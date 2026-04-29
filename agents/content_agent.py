@@ -212,19 +212,27 @@ Quy tắc bắt buộc:
             final_text += block.text
 
     # Phase 2: Nếu Gemini không gọi generate_image → tự động tạo ảnh
+    _log(f"\n[Debug] collected_images={len(collected_images)}, final_text_len={len(final_text)}")
     if not collected_images and final_text.strip():
-        _log("\n[Image] Gemini không gọi tool → tự động tạo ảnh...")
         preset = _pick_preset_for_task(task)
         n = _count_posts(task, final_text)
+        _log(f"[Image] Phase 2 bắt đầu: preset={preset}, n={n}")
         for i in range(n):
             try:
-                _log(f"[Image] Đang tạo ảnh {i+1}/{n} (preset: {preset})...")
+                _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
                 result = _run_async(generate_preset_image(preset))
+                _log(f"[Image] Kết quả raw: {str(result)[:200]}")
                 img_ref = result.get("local_path") or result.get("image_url", "")
-                collected_images.append((preset, img_ref))
-                _log(f"[Image] Ảnh {i+1} xong")
+                _log(f"[Image] img_ref={img_ref[:80] if img_ref else 'EMPTY'}")
+                if img_ref:
+                    collected_images.append((preset, img_ref))
+                    _log(f"[Image] ✓ Ảnh {i+1} thêm vào collected_images")
+                else:
+                    _log(f"[Image] ✗ img_ref rỗng, result={result}")
             except Exception as e:
-                _log(f"[Image] Lỗi ảnh {i+1}: {e}")
+                import traceback
+                _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
+                _log(traceback.format_exc()[:300])
 
     return final_text, collected_images
 

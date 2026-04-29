@@ -256,16 +256,22 @@ with tab2:
                 log_lines = []
 
                 def on_progress(msg):
-                    log_lines.append(msg)
-                    log_box.text("\n".join(log_lines[-12:]))
+                    log_lines.append(str(msg))
+                    log_box.text("\n".join(log_lines[-20:]))
 
                 with st.spinner("Đang tạo nội dung + hình ảnh (có thể mất 2-4 phút)..."):
                     try:
                         result_text, result_images = run_content_agent(task_content, on_progress=on_progress)
                     except Exception as e:
-                        result_text, result_images = f"❌ Lỗi: {e}", []
+                        import traceback
+                        result_text, result_images = f"❌ Lỗi: {e}\n\n```\n{traceback.format_exc()}\n```", []
 
+                # Giữ log lại để debug, thu gọn bằng expander
+                if log_lines:
+                    with st.expander("📋 Log chi tiết", expanded=(not result_images)):
+                        st.text("\n".join(log_lines))
                 log_box.empty()
+
                 st.markdown("---")
                 st.markdown("#### Kết quả")
                 st.markdown(result_text)
@@ -280,8 +286,11 @@ with tab2:
                             try:
                                 st.image(img_ref, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
                                 st.caption(f"`{img_ref}`")
-                            except Exception:
+                            except Exception as img_err:
+                                st.warning(f"Không hiển thị được ảnh: {img_err}")
                                 st.markdown(f"[Xem ảnh]({img_ref})")
+                else:
+                    st.warning("⚠️ Không có ảnh nào được tạo. Xem Log chi tiết ở trên để biết lý do.")
 
                 st.download_button(
                     "💾 Tải xuống (.txt)",
