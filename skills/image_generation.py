@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 KIE_BASE = "https://api.kie.ai"
-KIE_API_KEY = os.getenv("KIE_AI_API_KEY", "")
+# KIE_API_KEY đọc lazily trong hàm (không ở module level) để tránh bị capture
+# trước khi app.py gọi _load_secrets() bridge Streamlit secrets → os.environ
 
 # Thư mục output dùng absolute path (tránh lỗi relative path trên Streamlit Cloud)
 _OUTPUT_DIR = Path(__file__).parent.parent / "output"
@@ -48,8 +49,13 @@ async def generate_marketing_image(
     # Logo thật được overlay bằng Pillow sau khi generate
     branded_prompt = f"{prompt}, professional photography studio, Vietnam, high quality"
 
+    # Đọc API key tại thời điểm gọi hàm (sau khi app.py đã bridge secrets vào os.environ)
+    kie_api_key = os.getenv("KIE_AI_API_KEY", "")
+    if not kie_api_key:
+        raise ValueError("KIE_AI_API_KEY chưa được cấu hình. Kiểm tra .env hoặc Streamlit secrets.")
+
     headers = {
-        "Authorization": f"Bearer {KIE_API_KEY}",
+        "Authorization": f"Bearer {kie_api_key}",
         "Content-Type": "application/json",
     }
 
