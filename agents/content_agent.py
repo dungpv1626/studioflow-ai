@@ -162,12 +162,17 @@ def run_content_agent(task: str, on_progress=None) -> tuple[str, list]:
             "text": STUDIOFLOW_CONTEXT + """
 
 Bạn là Content Marketing Agent của Studio Flow.
-Quy tắc bắt buộc:
-1. Với mỗi bài viết (Facebook post, blog, ad copy), LUÔN gọi tool generate_image để tạo hình ảnh phù hợp kèm theo.
-2. Ưu tiên dùng preset có sẵn (social_post, hero_banner, feature_invoice, feature_calendar, kol_product, testimonial_bg) nếu phù hợp. Nếu không có preset phù hợp thì dùng custom prompt.
-3. LUÔN truyền tham số "caption" vào generate_image — đây là phụ đề tiếng Việt sẽ được in trực tiếp lên ảnh. Ví dụ: caption="Studio Flow: Quản lý studio thông minh, tiết kiệm thời gian!"
-4. Tạo TOÀN BỘ nội dung yêu cầu trong một lần. Không hỏi lại hay chờ xác nhận giữa chừng.
-5. Sau khi tạo xong tất cả nội dung và hình ảnh, trình bày kết quả đầy đủ.
+
+QUY TẮC BẮT BUỘC — KHÔNG ĐƯỢC VI PHẠM:
+1. SAU KHI viết xong mỗi bài viết, PHẢI gọi tool generate_image ngay lập tức.
+2. TUYỆT ĐỐI KHÔNG mô tả hình ảnh bằng text (không viết "Hình ảnh minh họa:", "Image:", "Ảnh đề xuất:", v.v.). Hệ thống sẽ tự tạo ảnh qua tool.
+3. Chọn preset phù hợp: social_post (mặc định), feature_invoice (hóa đơn), feature_calendar (lịch hẹn), kol_product (KOL/video), hero_banner (banner), testimonial_bg (đánh giá).
+4. LUÔN truyền "caption" — phụ đề tiếng Việt ngắn, in lên ảnh. VD: caption="Studio Flow: Quản lý studio thông minh!"
+5. Tạo TOÀN BỘ nội dung trong một lần. Không hỏi lại giữa chừng.
+6. Sau khi tạo xong toàn bộ nội dung và hình ảnh, tổng kết ngắn.
+
+Thứ tự làm việc đúng:
+→ Viết nội dung bài 1 → Gọi generate_image cho bài 1 → Viết nội dung bài 2 → Gọi generate_image cho bài 2 → ...
 """,
             "cache_control": {"type": "ephemeral"},
         }
@@ -284,10 +289,10 @@ Quy tắc bắt buộc:
     # Lấy text cuối cùng
     final_text = ""
     for block in response.content:
-        if hasattr(block, "text"):
+        if hasattr(block, "text") and block.text:
             final_text += block.text
 
-    # Phase 2: Nếu Gemini không gọi generate_image → tự động tạo ảnh
+    # Phase 2: Nếu Gemini không gọi generate_image → tự động tạo ảnh qua Kie AI
     _log(f"\n[Debug] collected_images={len(collected_images)}, final_text_len={len(final_text)}")
     if not collected_images and final_text.strip():
         preset = _pick_preset_for_task(task)
@@ -338,6 +343,20 @@ Quy tắc bắt buộc:
                 import traceback
                 _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
                 _log(traceback.format_exc()[:300])
+
+    # Phase 3: Nếu Kie AI cũng thất bại → dùng brand asset local làm fallback
+    if not collected_images:
+        _log("[Image] Phase 3: Kie AI không hoạt động, dùng brand asset local...")
+        try:
+            from skills.brand_assets import get_asset_path
+            from pathlib import Path as _Path
+            logo_path = get_asset_path("logo_primary") or get_asset_path("logo_nobg")
+            if logo_path and _Path(logo_path).exists():
+                img_bytes = _Path(logo_path).read_bytes()
+                collected_images.append(("brand_asset", str(logo_path), "", img_bytes))
+                _log(f"[Image] Phase 3 ✓ dùng {logo_path.name}")
+        except Exception as e:
+            _log(f"[Image] Phase 3 ✗: {e}")
 
     return final_text, collected_images
 
