@@ -187,13 +187,29 @@ Quy tắc bắt buộc:
             for block in response.content:
                 if block.type == "tool_use":
                     _log(f"\n[Tool] Đang chạy: {block.name}...")
-                    result = _execute_tool(block.name, block.input)
-                    _log(f"[Tool] Xong: {str(result)[:120]}")
-                    # Thu thập image URL
-                    if block.name == "generate_image" and "Image URL:" in str(result):
-                        url = str(result).replace("Image URL:", "").strip()
-                        preset = block.input.get("preset") or "custom"
-                        collected_images.append((preset, url))
+
+                    # Xử lý generate_image riêng để lấy cả local_path và image_url
+                    if block.name == "generate_image":
+                        try:
+                            if "preset" in block.input:
+                                img_result = _run_async(generate_preset_image(block.input["preset"]))
+                            else:
+                                img_result = _run_async(generate_marketing_image(block.input["prompt"]))
+                            local_path = img_result.get("local_path", "")
+                            image_url = img_result.get("image_url", "")
+                            preset_name = block.input.get("preset") or "custom"
+                            if local_path or image_url:
+                                collected_images.append((preset_name, local_path, image_url))
+                                _log(f"[Tool] Xong: local={local_path[:60] if local_path else 'none'} url={image_url[:60] if image_url else 'none'}")
+                            result = f"Image URL: {local_path or image_url}"
+                        except Exception as e:
+                            import traceback
+                            result = f"[Image generation failed: {e}]"
+                            _log(f"[Tool] Lỗi generate_image: {e}")
+                    else:
+                        result = _execute_tool(block.name, block.input)
+                        _log(f"[Tool] Xong: {str(result)[:120]}")
+
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -222,13 +238,15 @@ Quy tắc bắt buộc:
                 _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
                 result = _run_async(generate_preset_image(preset))
                 _log(f"[Image] Kết quả raw: {str(result)[:200]}")
-                img_ref = result.get("local_path") or result.get("image_url", "")
-                _log(f"[Image] img_ref={img_ref[:80] if img_ref else 'EMPTY'}")
-                if img_ref:
-                    collected_images.append((preset, img_ref))
+                local_path = result.get("local_path", "")
+                image_url = result.get("image_url", "")
+                _log(f"[Image] local_path={local_path[:80] if local_path else 'EMPTY'}")
+                _log(f"[Image] image_url={image_url[:80] if image_url else 'EMPTY'}")
+                if local_path or image_url:
+                    collected_images.append((preset, local_path, image_url))
                     _log(f"[Image] ✓ Ảnh {i+1} thêm vào collected_images")
                 else:
-                    _log(f"[Image] ✗ img_ref rỗng, result={result}")
+                    _log(f"[Image] ✗ Cả local_path và image_url đều rỗng, result={result}")
             except Exception as e:
                 import traceback
                 _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
