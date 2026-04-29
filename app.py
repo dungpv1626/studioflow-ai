@@ -276,51 +276,42 @@ with tab2:
                 st.markdown("#### Kết quả")
                 st.markdown(result_text)
 
-                # Hiển thị ảnh (local path có logo hoặc URL)
+                # Hiển thị ảnh
                 if result_images:
                     st.markdown("---")
                     st.markdown("#### 🖼️ Hình ảnh đã tạo (có logo Studio Flow)")
                     img_cols = st.columns(min(len(result_images), 3))
                     for i, item in enumerate(result_images):
-                        # Hỗ trợ cả (preset, path) cũ và (preset, local_path, image_url) mới
-                        if len(item) == 3:
-                            preset, local_path, image_url = item
-                        else:
-                            preset, ref = item
-                            local_path = ref if not ref.startswith("http") else ""
-                            image_url = ref if ref.startswith("http") else ""
+                        # item có thể là (preset, local_path, image_url, bytes) hoặc tuple cũ hơn
+                        preset   = item[0] if len(item) > 0 else "custom"
+                        local_path = item[1] if len(item) > 1 else ""
+                        image_url  = item[2] if len(item) > 2 else ""
+                        img_bytes  = item[3] if len(item) > 3 else None
+
+                        # Đọc bytes từ file nếu chưa có
+                        if not img_bytes and local_path:
+                            try:
+                                img_bytes = Path(local_path).read_bytes()
+                            except Exception:
+                                pass
 
                         with img_cols[i % 3]:
-                            # Resolve absolute path cho local file
-                            abs_path = None
-                            if local_path:
-                                p = Path(local_path)
-                                if not p.is_absolute():
-                                    p = Path(__file__).parent / local_path
-                                if p.exists():
-                                    abs_path = str(p)
-
-                            display_src = abs_path or image_url
-
-                            if display_src:
-                                st.image(display_src, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
-                                # Nút download
-                                if abs_path:
-                                    with open(abs_path, "rb") as f:
-                                        st.download_button(
-                                            f"⬇️ Tải ảnh {i+1}",
-                                            data=f.read(),
-                                            file_name=f"studioflow_{preset}_{i+1}.jpg",
-                                            mime="image/jpeg",
-                                            key=f"dl_img_{i}",
-                                            use_container_width=True,
-                                        )
-                                elif image_url:
-                                    st.markdown(f"[⬇️ Tải ảnh {i+1}]({image_url})")
+                            if img_bytes:
+                                st.image(img_bytes, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
+                                fname = Path(local_path).name if local_path else f"studioflow_{preset}_{i+1}.jpg"
+                                st.download_button(
+                                    f"⬇️ Tải ảnh {i+1}",
+                                    data=img_bytes,
+                                    file_name=fname,
+                                    mime="image/jpeg",
+                                    key=f"dl_img_{i}",
+                                    use_container_width=True,
+                                )
+                            elif image_url:
+                                st.image(image_url, caption=f"Ảnh {i+1} · {preset} (chưa có logo)", use_container_width=True)
+                                st.markdown(f"[⬇️ Tải ảnh {i+1}]({image_url})")
                             else:
-                                st.warning(f"Không tìm thấy file ảnh {i+1}")
-                                if image_url:
-                                    st.markdown(f"[Xem ảnh gốc (chưa có logo)]({image_url})")
+                                st.warning(f"Không tải được ảnh {i+1}")
                 else:
                     st.warning("⚠️ Không có ảnh nào được tạo. Xem Log chi tiết ở trên để biết lý do.")
 

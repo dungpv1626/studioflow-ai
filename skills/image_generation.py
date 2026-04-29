@@ -14,6 +14,9 @@ load_dotenv()
 KIE_BASE = "https://api.kie.ai"
 KIE_API_KEY = os.getenv("KIE_AI_API_KEY", "")
 
+# Thư mục output dùng absolute path (tránh lỗi relative path trên Streamlit Cloud)
+_OUTPUT_DIR = Path(__file__).parent.parent / "output"
+
 ASPECT_MAP = {
     "1:1":   "1:1",
     "16:9":  "16:9",
@@ -80,13 +83,15 @@ async def generate_marketing_image(
 
     if image_url:
         # Luôn download về local để overlay logo
-        import tempfile
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.get(image_url)
             r.raise_for_status()
 
-        save_path = output_path or f"output/gen_{task_id[:8]}.jpg"
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        if output_path:
+            save_path = str(Path(output_path).resolve())
+        else:
+            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            save_path = str(_OUTPUT_DIR / f"gen_{task_id[:8]}.jpg")
         Path(save_path).write_bytes(r.content)
 
         # Overlay logo nếu có

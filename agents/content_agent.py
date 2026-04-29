@@ -89,6 +89,20 @@ CONTENT_TOOLS = [
 ]
 
 
+def _read_img_bytes(local_path: str) -> bytes | None:
+    """Đọc ảnh từ local file thành bytes. Trả None nếu thất bại."""
+    if not local_path:
+        return None
+    try:
+        from pathlib import Path as _Path
+        p = _Path(local_path)
+        if p.exists():
+            return p.read_bytes()
+    except Exception:
+        pass
+    return None
+
+
 def _run_async(coro):
     """Chạy coroutine an toàn dù đang trong event loop hay không."""
     import asyncio
@@ -197,10 +211,11 @@ Quy tắc bắt buộc:
                                 img_result = _run_async(generate_marketing_image(block.input["prompt"]))
                             local_path = img_result.get("local_path", "")
                             image_url = img_result.get("image_url", "")
+                            img_bytes = _read_img_bytes(local_path)
                             preset_name = block.input.get("preset") or "custom"
-                            if local_path or image_url:
-                                collected_images.append((preset_name, local_path, image_url))
-                                _log(f"[Tool] Xong: local={local_path[:60] if local_path else 'none'} url={image_url[:60] if image_url else 'none'}")
+                            if img_bytes or local_path or image_url:
+                                collected_images.append((preset_name, local_path, image_url, img_bytes))
+                                _log(f"[Tool] Xong: local={local_path[:60] if local_path else 'none'} bytes={len(img_bytes) if img_bytes else 0}")
                             result = f"Image URL: {local_path or image_url}"
                         except Exception as e:
                             import traceback
@@ -240,13 +255,15 @@ Quy tắc bắt buộc:
                 _log(f"[Image] Kết quả raw: {str(result)[:200]}")
                 local_path = result.get("local_path", "")
                 image_url = result.get("image_url", "")
+                img_bytes = _read_img_bytes(local_path)
                 _log(f"[Image] local_path={local_path[:80] if local_path else 'EMPTY'}")
                 _log(f"[Image] image_url={image_url[:80] if image_url else 'EMPTY'}")
-                if local_path or image_url:
-                    collected_images.append((preset, local_path, image_url))
+                _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0}")
+                if img_bytes or local_path or image_url:
+                    collected_images.append((preset, local_path, image_url, img_bytes))
                     _log(f"[Image] ✓ Ảnh {i+1} thêm vào collected_images")
                 else:
-                    _log(f"[Image] ✗ Cả local_path và image_url đều rỗng, result={result}")
+                    _log(f"[Image] ✗ Không có gì, result={result}")
             except Exception as e:
                 import traceback
                 _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
