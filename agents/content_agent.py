@@ -15,7 +15,8 @@ from skills.image_generation import generate_marketing_image, generate_preset_im
 
 _client = get_client()
 
-# Tools định nghĩa cho agent
+# generate_image đã bị loại khỏi CONTENT_TOOLS vì Gemini luôn bỏ qua tool call
+# và thay bằng mô tả text. Hình ảnh được tạo tự động sau khi agent viết xong content.
 CONTENT_TOOLS = [
     {
         "name": "write_facebook_post",
@@ -44,25 +45,6 @@ CONTENT_TOOLS = [
                 "word_count": {"type": "integer", "default": 800},
             },
             "required": ["title", "keywords"],
-        },
-    },
-    {
-        "name": "generate_image",
-        "description": "Tạo hình ảnh marketing sử dụng Kie AI. Có thể thêm phụ đề tiếng Việt trực tiếp lên ảnh.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "prompt": {"type": "string", "description": "Mô tả hình ảnh cần tạo"},
-                "preset": {
-                    "type": "string",
-                    "enum": list(IMAGE_PRESETS.keys()),
-                    "description": "Dùng preset có sẵn thay vì prompt",
-                },
-                "caption": {
-                    "type": "string",
-                    "description": "Phụ đề tiếng Việt sẽ được in trực tiếp lên ảnh (dải chữ phía dưới)",
-                },
-            },
         },
     },
     {
@@ -182,17 +164,13 @@ def run_content_agent(task: str, on_progress=None) -> tuple[str, list]:
             "text": STUDIOFLOW_CONTEXT + """
 
 Bạn là Content Marketing Agent của Studio Flow.
+Nhiệm vụ: Viết nội dung marketing chất lượng cao. Hình ảnh sẽ được tạo TỰ ĐỘNG bởi hệ thống sau khi bạn viết xong — bạn KHÔNG cần mô tả hay đề xuất hình ảnh.
 
-QUY TẮC BẮT BUỘC — KHÔNG ĐƯỢC VI PHẠM:
-1. SAU KHI viết xong mỗi bài viết, PHẢI gọi tool generate_image ngay lập tức.
-2. TUYỆT ĐỐI KHÔNG mô tả hình ảnh bằng text (không viết "Hình ảnh minh họa:", "Image:", "Ảnh đề xuất:", v.v.). Hệ thống sẽ tự tạo ảnh qua tool.
-3. Chọn preset phù hợp: social_post (mặc định), feature_invoice (hóa đơn), feature_calendar (lịch hẹn), kol_product (KOL/video), hero_banner (banner), testimonial_bg (đánh giá).
-4. LUÔN truyền "caption" — phụ đề tiếng Việt ngắn, in lên ảnh. VD: caption="Studio Flow: Quản lý studio thông minh!"
-5. Tạo TOÀN BỘ nội dung trong một lần. Không hỏi lại giữa chừng.
-6. Sau khi tạo xong toàn bộ nội dung và hình ảnh, tổng kết ngắn.
-
-Thứ tự làm việc đúng:
-→ Viết nội dung bài 1 → Gọi generate_image cho bài 1 → Viết nội dung bài 2 → Gọi generate_image cho bài 2 → ...
+Quy tắc:
+1. Tạo TOÀN BỘ nội dung được yêu cầu (Facebook post, blog, ad copy, v.v.).
+2. KHÔNG viết phần "Hình ảnh minh họa", "Mô tả ảnh", "Image suggestion" hay bất kỳ mô tả hình ảnh nào — hệ thống xử lý riêng.
+3. Không hỏi lại hay chờ xác nhận giữa chừng.
+4. Trình bày kết quả rõ ràng với heading cho từng bài.
 """,
             "cache_control": {"type": "ephemeral"},
         }
@@ -240,36 +218,8 @@ Thứ tự làm việc đúng:
                 if block.type == "tool_use":
                     _log(f"\n[Tool] Đang chạy: {block.name}...")
 
-                    # Xử lý generate_image riêng để lấy img_bytes trực tiếp từ memory
-                    if block.name == "generate_image":
-                        try:
-                            if "preset" in block.input:
-                                img_result = _run_async(generate_preset_image(block.input["preset"]))
-                            else:
-                                img_result = _run_async(generate_marketing_image(block.input["prompt"]))
-                            local_path = img_result.get("local_path", "")
-                            image_url = img_result.get("image_url", "")
-                            # img_bytes đã được overlay logo trong memory bởi image_generation.py
-                            img_bytes = img_result.get("img_bytes")
-
-                            # Thêm phụ đề tiếng Việt nếu có
-                            caption = block.input.get("caption", "").strip()
-                            if caption and img_bytes:
-                                img_bytes = _apply_caption_to_bytes(img_bytes, caption)
-                                _log(f"[Tool] Đã thêm phụ đề: {caption[:60]}")
-
-                            preset_name = block.input.get("preset") or "custom"
-                            if img_bytes or local_path or image_url:
-                                collected_images.append((preset_name, local_path, image_url, img_bytes))
-                                _log(f"[Tool] Xong: bytes={len(img_bytes) if img_bytes else 0} local={local_path[:60] if local_path else 'none'}")
-                            result = f"Ảnh đã được tạo thành công (có logo Studio Flow)"
-                        except Exception as e:
-                            import traceback
-                            result = f"[Image generation failed: {e}]"
-                            _log(f"[Tool] Lỗi generate_image: {e}")
-                    else:
-                        result = _execute_tool(block.name, block.input)
-                        _log(f"[Tool] Xong: {str(result)[:120]}")
+                    result = _execute_tool(block.name, block.input)
+                    _log(f"[Tool] Xong: {str(result)[:120]}")
 
                     # Giới hạn content mỗi tool result ≤ 2000 ký tự tránh phình token
                     result_str = str(result)
@@ -292,52 +242,58 @@ Thứ tự làm việc đúng:
         if hasattr(block, "text") and block.text:
             final_text += block.text
 
-    # Phase 2: Nếu Gemini không gọi generate_image → tự động tạo ảnh qua Kie AI
-    _log(f"\n[Debug] collected_images={len(collected_images)}, final_text_len={len(final_text)}")
-    if not collected_images and final_text.strip():
-        preset = _pick_preset_for_task(task)
-        n = _count_posts(task, final_text)
-        _log(f"[Image] Phase 2 bắt đầu: preset={preset}, n={n}")
-        for i in range(n):
-            try:
-                _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
-                result = _run_async(generate_preset_image(preset))
-                _log(f"[Image] Kết quả raw: {str(result)[:200]}")
-                local_path = result.get("local_path", "")
-                image_url = result.get("image_url", "")
-                # img_bytes đã có logo từ image_generation.py
-                img_bytes = result.get("img_bytes")
+    # Xoá mô tả hình ảnh mà Gemini có thể viết trong text (không cần nữa vì hình ảnh tạo tự động)
+    import re
+    final_text = re.sub(
+        r'\n?\*?\*?(?:Mô tả hình ảnh|Hình ảnh minh họa|Hình ảnh đề xuất|Image suggestion|Ảnh minh họa|Image:|Ảnh:)[^\n]*(?:\n(?!\n)[^\n]*)*',
+        '',
+        final_text,
+        flags=re.IGNORECASE,
+    ).strip()
 
-                # Phase 2: thêm phụ đề tự động
-                auto_caption = _make_auto_caption(task)
-                if auto_caption and img_bytes:
-                    img_bytes = _apply_caption_to_bytes(img_bytes, auto_caption)
-                    _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
+    # Tạo ảnh tự động — luôn chạy (generate_image đã bị bỏ khỏi tools)
+    preset = _pick_preset_for_task(task)
+    n = _count_posts(task, final_text)
+    auto_caption = _make_auto_caption(task)
+    _log(f"\n[Image] Bắt đầu tạo {n} ảnh (preset={preset})...")
 
-                _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0} local={local_path[:60] if local_path else 'EMPTY'}")
-                if img_bytes or local_path or image_url:
-                    collected_images.append((preset, local_path, image_url, img_bytes))
-                    _log(f"[Image] ✓ Ảnh {i+1} thêm vào collected_images")
-                else:
-                    _log(f"[Image] ✗ Không có gì, result={result}")
-            except Exception as e:
-                import traceback
-                _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
-                _log(traceback.format_exc()[:300])
-
-    # Phase 3: Nếu Kie AI cũng thất bại → dùng brand asset local làm fallback
-    if not collected_images:
-        _log("[Image] Phase 3: Kie AI không hoạt động, dùng brand asset local...")
+    for i in range(n):
         try:
-            from skills.brand_assets import get_asset_path
-            from pathlib import Path as _Path
-            logo_path = get_asset_path("logo_primary") or get_asset_path("logo_nobg")
-            if logo_path and _Path(logo_path).exists():
-                img_bytes = _Path(logo_path).read_bytes()
-                collected_images.append(("brand_asset", str(logo_path), "", img_bytes))
-                _log(f"[Image] Phase 3 ✓ dùng {logo_path.name}")
+            _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
+            result = _run_async(generate_preset_image(preset))
+            local_path = result.get("local_path", "")
+            image_url = result.get("image_url", "")
+            img_bytes = result.get("img_bytes")
+
+            if auto_caption and img_bytes:
+                img_bytes = _apply_caption_to_bytes(img_bytes, auto_caption)
+                _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
+
+            _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0}")
+            if img_bytes or local_path or image_url:
+                collected_images.append((preset, local_path, image_url, img_bytes))
+                _log(f"[Image] ✓ Ảnh {i+1}/{n} hoàn thành")
+            else:
+                _log(f"[Image] ✗ Ảnh {i+1}: result rỗng")
         except Exception as e:
-            _log(f"[Image] Phase 3 ✗: {e}")
+            import traceback
+            _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
+            _log(traceback.format_exc()[:300])
+
+    # Fallback: nếu Kie AI hoàn toàn thất bại → dùng logo brand asset
+    if not collected_images:
+        _log("[Image] Fallback: Kie AI không phản hồi, dùng brand asset...")
+        try:
+            from pathlib import Path as _Path
+            _logo_dir = _Path(__file__).parent.parent / "assets" / "logo"
+            for _name in ["Studioflow -Logo.png", "Studioflow-logo - BG- removed.png"]:
+                _p = _logo_dir / _name
+                if _p.exists():
+                    collected_images.append(("brand_asset", str(_p), "", _p.read_bytes()))
+                    _log(f"[Image] Fallback ✓ dùng {_name}")
+                    break
+        except Exception as e:
+            _log(f"[Image] Fallback ✗: {e}")
 
     return final_text, collected_images
 
