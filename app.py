@@ -167,13 +167,14 @@ def run_async(coro):
 
 
 # ─── Tabs chính ───────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🤖 Orchestrator",
     "✍️ Content Agent",
     "🎬 KOL Agent",
     "📊 Business Analyst",
     "🖼️ Tạo hình ảnh",
     "🗂️ Brand Assets",
+    "📅 Monthly Planner",
 ])
 
 
@@ -550,3 +551,92 @@ with tab6:
             st.markdown(f"- `{m}`")
     else:
         st.success("✅ Tất cả assets đã được upload đầy đủ!")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7: Monthly Planner
+# ══════════════════════════════════════════════════════════════════════════════
+with tab7:
+    st.markdown("### 📅 Monthly Planner — Kế hoạch tháng toàn diện")
+    st.caption("Tạo đầy đủ 7 loại kế hoạch cho team: Đăng bài · Marketing · KOL · Ads · PR · Sales · Timeline")
+
+    st.info("⏱️ **Ước tính thời gian:** 3–5 phút (7 kế hoạch được tạo tuần tự). Kết quả có thể tải xuống dưới dạng .md hoặc .txt", icon="ℹ️")
+
+    PLAN_EXAMPLES = [
+        "Tạo plan tháng 5/2025, mục tiêu tăng 50 user Pro, ngân sách ads 10 triệu",
+        "Plan tháng 6: ra mắt tính năng GPS Check-in, tập trung convert Free → Pro",
+        "Kế hoạch tháng 7: mùa cưới cao điểm, đẩy mạnh KOL studio ảnh cưới HN & HCM",
+        "Plan tháng 8: tăng trưởng gói Business, target studio lớn 10+ nhân viên",
+    ]
+
+    st.markdown("**Ví dụ nhanh:**")
+    cols = st.columns(2)
+    for i, ex in enumerate(PLAN_EXAMPLES):
+        if cols[i % 2].button(ex, key=f"plan_{i}", use_container_width=True):
+            st.session_state["plan_task"] = ex
+
+    task_plan = st.text_area(
+        "Mô tả kế hoạch cần tạo",
+        value=st.session_state.get("plan_task", ""),
+        height=120,
+        placeholder="Ví dụ: Tạo plan tháng 5/2025, mục tiêu tăng 50 user Pro, ngân sách ads 10 triệu đồng...",
+        key="plan_input",
+    )
+
+    if st.button("📅 Tạo bộ kế hoạch tháng", type="primary", use_container_width=True, key="btn_plan"):
+        if task_plan.strip():
+            if not os.getenv("GEMINI_API_KEY"):
+                st.error("❌ Chưa có GEMINI_API_KEY.")
+            else:
+                from agents.planning_agent import run_planning_agent
+                log_box = st.empty()
+                log_lines = []
+
+                def on_plan_progress(msg):
+                    log_lines.append(str(msg))
+                    log_box.text("\n".join(log_lines[-20:]))
+
+                with st.spinner("Đang tạo 7 kế hoạch... (3–5 phút, vui lòng chờ)"):
+                    try:
+                        plan_result = run_planning_agent(task_plan, on_progress=on_plan_progress)
+                    except Exception as e:
+                        import traceback
+                        plan_result = f"❌ Lỗi: {e}\n\n```\n{traceback.format_exc()}\n```"
+
+                if log_lines:
+                    with st.expander("📋 Log chi tiết", expanded=False):
+                        st.text("\n".join(log_lines))
+                log_box.empty()
+
+                st.markdown("---")
+
+                # Metrics
+                import re as _re
+                sections_found = len(_re.findall(r'^## [📅🎯🎬💰📣💼🗓️]', plan_result, _re.MULTILINE))
+                col_m1, col_m2 = st.columns(2)
+                col_m1.metric("Kế hoạch đã tạo", f"{sections_found}/7")
+                col_m2.metric("Độ dài tài liệu", f"{len(plan_result):,} ký tự".replace(",", "."))
+
+                st.markdown("#### 📋 Kết quả")
+                st.markdown(plan_result)
+
+                st.markdown("---")
+                col_dl1, col_dl2 = st.columns(2)
+                with col_dl1:
+                    st.download_button(
+                        "💾 Tải xuống (.md)",
+                        data=plan_result.encode("utf-8"),
+                        file_name="monthly_plan.md",
+                        mime="text/markdown",
+                        use_container_width=True,
+                    )
+                with col_dl2:
+                    st.download_button(
+                        "📄 Tải xuống (.txt)",
+                        data=plan_result.encode("utf-8"),
+                        file_name="monthly_plan.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+        else:
+            st.warning("Vui lòng nhập yêu cầu kế hoạch")
