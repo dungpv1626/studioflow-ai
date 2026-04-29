@@ -205,6 +205,7 @@ Quy tắc:
             break
 
         if response.stop_reason == "tool_use":
+            import time as _time
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
@@ -214,6 +215,8 @@ Quy tắc:
                     plan_results[block.name] = full_result
 
                     _log(f"[Plan] Xong ({len(full_result)} ký tự)")
+                    # Chờ ngắn giữa các lần gọi LLM để tránh bị rate limit Gemini
+                    _time.sleep(3)
 
                     # Truncate cho tool_result để tránh token overflow
                     result_str = full_result

@@ -167,17 +167,30 @@ class MessagesAPI:
 
         import time
         from openai import APIStatusError
-        for attempt in range(3):
+
+        # Retry với exponential backoff: 3 lần flash, 2 lần pro
+        RETRY_SCHEDULE = [
+            (mapped_model, 5),
+            (mapped_model, 10),
+            (mapped_model, 20),
+            (FALLBACK_MODEL, 15),
+            (FALLBACK_MODEL, 0),
+        ]
+        last_exc = None
+        for model_try, wait_sec in RETRY_SCHEDULE:
+            kwargs_final["model"] = model_try
             try:
-                model_used = kwargs_final["model"] if attempt == 0 else FALLBACK_MODEL
-                kwargs_final["model"] = model_used
                 response = self._client.chat.completions.create(**kwargs_final)
                 return GeminiMessage(response)
             except APIStatusError as e:
-                if e.status_code == 503 and attempt < 2:
-                    time.sleep(3)
+                last_exc = e
+                if e.status_code in (503, 429, 500):
+                    if wait_sec > 0:
+                        print(f"[LLM] {e.status_code} on {model_try}, thử lại sau {wait_sec}s...")
+                        time.sleep(wait_sec)
                     continue
                 raise
+        raise last_exc
 
 
 class GeminiClient:

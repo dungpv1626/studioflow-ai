@@ -215,7 +215,7 @@ Quy tắc bắt buộc:
                 if block.type == "tool_use":
                     _log(f"\n[Tool] Đang chạy: {block.name}...")
 
-                    # Xử lý generate_image riêng để lấy cả local_path và image_url
+                    # Xử lý generate_image riêng để lấy img_bytes trực tiếp từ memory
                     if block.name == "generate_image":
                         try:
                             if "preset" in block.input:
@@ -224,23 +224,40 @@ Quy tắc bắt buộc:
                                 img_result = _run_async(generate_marketing_image(block.input["prompt"]))
                             local_path = img_result.get("local_path", "")
                             image_url = img_result.get("image_url", "")
+                            # img_bytes đã được overlay logo trong memory bởi image_generation.py
+                            img_bytes = img_result.get("img_bytes")
 
-                            # Thêm phụ đề tiếng Việt nếu có
+                            # Thêm phụ đề tiếng Việt nếu có (ghi đè lên disk file, rồi đọc lại)
                             caption = block.input.get("caption", "").strip()
-                            if caption and local_path:
+                            if caption:
                                 try:
                                     from skills.brand_assets import add_caption
-                                    add_caption(local_path, caption, local_path)
-                                    _log(f"[Tool] Đã thêm phụ đề: {caption[:60]}")
+                                    import io as _io
+                                    if img_bytes:
+                                        # Xử lý caption trong memory
+                                        from PIL import Image as _PImage
+                                        import tempfile, os as _os
+                                        tmp_in = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                                        tmp_in.write(img_bytes)
+                                        tmp_in.close()
+                                        tmp_out = tmp_in.name
+                                        add_caption(tmp_in.name, caption, tmp_out)
+                                        with open(tmp_out, "rb") as f:
+                                            img_bytes = f.read()
+                                        _os.unlink(tmp_out)
+                                        _log(f"[Tool] Đã thêm phụ đề: {caption[:60]}")
+                                    elif local_path:
+                                        add_caption(local_path, caption, local_path)
+                                        img_bytes = _read_img_bytes(local_path)
+                                        _log(f"[Tool] Đã thêm phụ đề (disk): {caption[:60]}")
                                 except Exception as cap_err:
                                     _log(f"[Tool] Lỗi add_caption: {cap_err}")
 
-                            img_bytes = _read_img_bytes(local_path)
                             preset_name = block.input.get("preset") or "custom"
                             if img_bytes or local_path or image_url:
                                 collected_images.append((preset_name, local_path, image_url, img_bytes))
-                                _log(f"[Tool] Xong: local={local_path[:60] if local_path else 'none'} bytes={len(img_bytes) if img_bytes else 0}")
-                            result = f"Image URL: {local_path or image_url}"
+                                _log(f"[Tool] Xong: bytes={len(img_bytes) if img_bytes else 0} local={local_path[:60] if local_path else 'none'}")
+                            result = f"Ảnh đã được tạo thành công (có logo Studio Flow)"
                         except Exception as e:
                             import traceback
                             result = f"[Image generation failed: {e}]"
@@ -283,20 +300,35 @@ Quy tắc bắt buộc:
                 _log(f"[Image] Kết quả raw: {str(result)[:200]}")
                 local_path = result.get("local_path", "")
                 image_url = result.get("image_url", "")
-                # Phase 2: thêm phụ đề tự động từ task
-                if local_path:
+                # img_bytes đã có logo từ image_generation.py
+                img_bytes = result.get("img_bytes")
+
+                # Phase 2: thêm phụ đề tự động
+                auto_caption = _make_auto_caption(task)
+                if auto_caption and img_bytes:
                     try:
                         from skills.brand_assets import add_caption
-                        auto_caption = _make_auto_caption(task)
-                        if auto_caption:
-                            add_caption(local_path, auto_caption, local_path)
-                            _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
+                        import tempfile, os as _os
+                        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                        tmp.write(img_bytes)
+                        tmp.close()
+                        add_caption(tmp.name, auto_caption, tmp.name)
+                        with open(tmp.name, "rb") as f:
+                            img_bytes = f.read()
+                        _os.unlink(tmp.name)
+                        _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
                     except Exception as cap_err:
                         _log(f"[Image] Lỗi add_caption: {cap_err}")
-                img_bytes = _read_img_bytes(local_path)
-                _log(f"[Image] local_path={local_path[:80] if local_path else 'EMPTY'}")
-                _log(f"[Image] image_url={image_url[:80] if image_url else 'EMPTY'}")
-                _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0}")
+                elif auto_caption and local_path:
+                    try:
+                        from skills.brand_assets import add_caption
+                        add_caption(local_path, auto_caption, local_path)
+                        img_bytes = _read_img_bytes(local_path)
+                        _log(f"[Image] Đã thêm phụ đề (disk): {auto_caption[:60]}")
+                    except Exception as cap_err:
+                        _log(f"[Image] Lỗi add_caption: {cap_err}")
+
+                _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0} local={local_path[:60] if local_path else 'EMPTY'}")
                 if img_bytes or local_path or image_url:
                     collected_images.append((preset, local_path, image_url, img_bytes))
                     _log(f"[Image] ✓ Ảnh {i+1} thêm vào collected_images")

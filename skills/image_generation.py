@@ -5,6 +5,7 @@ POST /api/v1/jobs/createTask → poll GET /api/v1/jobs/recordInfo?taskId=...
 import httpx
 import asyncio
 import json
+import io
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -80,33 +81,83 @@ async def generate_marketing_image(
         "image_url": image_url,
         "prompt_used": branded_prompt,
         "local_path": None,
+        "img_bytes": None,
         "task_id": task_id,
     }
 
     if image_url:
-        # Luôn download về local để overlay logo
+        # Download ảnh về memory
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.get(image_url)
             r.raise_for_status()
 
-        if output_path:
-            save_path = str(Path(output_path).resolve())
-        else:
-            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            save_path = str(_OUTPUT_DIR / f"gen_{task_id[:8]}.jpg")
-        Path(save_path).write_bytes(r.content)
+        raw_bytes = r.content
 
-        # Overlay logo Studio Flow
+        # Overlay logo hoàn toàn trong bộ nhớ (không phụ thuộc disk path)
+        img_bytes_with_logo = _overlay_logo_in_memory(raw_bytes)
+        result["img_bytes"] = img_bytes_with_logo
+
+        # Vẫn lưu xuống disk để dùng add_caption sau nếu cần
         try:
-            from skills.brand_assets import overlay_logo, get_asset_path
-            if get_asset_path("logo_nobg") or get_asset_path("logo_primary"):
-                overlay_logo(save_path, save_path)
-        except Exception as _logo_err:
-            print(f"[Logo overlay failed] {_logo_err}")
-
-        result["local_path"] = save_path
+            if output_path:
+                save_path = str(Path(output_path).resolve())
+            else:
+                _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                save_path = str(_OUTPUT_DIR / f"gen_{task_id[:8]}.jpg")
+            Path(save_path).write_bytes(img_bytes_with_logo)
+            result["local_path"] = save_path
+        except Exception as _save_err:
+            print(f"[Image save to disk failed] {_save_err}")
 
     return result
+
+
+def _overlay_logo_in_memory(raw_bytes: bytes) -> bytes:
+    """Ghép logo Studio Flow lên ảnh hoàn toàn trong bộ nhớ, trả về JPEG bytes."""
+    try:
+        from PIL import Image, ImageDraw
+        from skills.brand_assets import get_asset_path
+
+        logo_path = get_asset_path("logo_nobg") or get_asset_path("logo_primary")
+        if not logo_path:
+            print("[Logo overlay] Không tìm thấy logo, trả ảnh gốc")
+            return raw_bytes
+
+        base = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
+        logo = Image.open(logo_path).convert("RGBA")
+
+        logo_ratio = 0.28
+        padding = 20
+        inner_pad = 12
+
+        logo_w = int(base.width * logo_ratio)
+        logo_h = int(logo.height * logo_w / logo.width)
+        logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
+
+        bw, bh = base.size
+        lw, lh = logo.size
+        x = bw - lw - padding - inner_pad
+        y = bh - lh - padding - inner_pad
+
+        # Backing tối màu Studio Flow cho logo trắng
+        backing_layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+        bd = ImageDraw.Draw(backing_layer)
+        bx0, by0 = x - inner_pad, y - inner_pad
+        bx1, by1 = x + lw + inner_pad, y + lh + inner_pad
+        try:
+            bd.rounded_rectangle([bx0, by0, bx1, by1], radius=10, fill=(15, 32, 68, 210))
+        except AttributeError:
+            bd.rectangle([bx0, by0, bx1, by1], fill=(15, 32, 68, 210))
+        base = Image.alpha_composite(base, backing_layer)
+        base.paste(logo, (x, y), mask=logo)
+
+        out = io.BytesIO()
+        base.convert("RGB").save(out, format="JPEG", quality=95)
+        return out.getvalue()
+
+    except Exception as e:
+        print(f"[Logo overlay in-memory failed] {e}")
+        return raw_bytes
 
 
 async def _poll_task(client: httpx.AsyncClient, headers: dict, task_id: str, max_wait: int = 180) -> str:
