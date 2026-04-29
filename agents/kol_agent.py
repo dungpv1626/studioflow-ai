@@ -161,6 +161,7 @@ def run_kol_agent(task: str) -> str:
     - "Chuẩn bị toàn bộ campaign KOL cho tháng 5: brief, kịch bản TikTok, FB Live, và outreach message"
     """
     messages = [{"role": "user", "content": task}]
+    initial_message = messages[0]
 
     system = [
         {
@@ -178,7 +179,13 @@ Sau mỗi bước, báo cáo ngắn gọn những gì đã làm.
 
     print(f"\n[KOL Agent] Task: {task}\n")
 
-    while True:
+    MAX_ITERATIONS = 10
+    iteration = 0
+    while iteration < MAX_ITERATIONS:
+        iteration += 1
+        if len(messages) > 7:
+            messages = [initial_message] + messages[-6:]
+
         response = _client.messages.create(
             model=config.CLAUDE_DEFAULT_MODEL,
             max_tokens=4096,
@@ -200,10 +207,13 @@ Sau mỗi bước, báo cáo ngắn gọn những gì đã làm.
                 if block.type == "tool_use":
                     print(f"\n[Tool] {block.name}...")
                     result = _execute_kol_tool(block.name, block.input)
+                    result_str = str(result)
+                    if len(result_str) > 2000:
+                        result_str = result_str[:1900] + "... [truncated]"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": str(result),
+                        "content": result_str,
                     })
 
             messages.append({"role": "assistant", "content": response.content})

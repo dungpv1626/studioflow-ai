@@ -203,6 +203,7 @@ def run_business_analyst_agent(task: str) -> str:
     - "Phân tích tại sao user free không chuyển lên Pro và đề xuất giải pháp"
     """
     messages = [{"role": "user", "content": task}]
+    initial_message = messages[0]
 
     system = [
         {
@@ -219,7 +220,13 @@ Luôn data-driven, actionable, và thực tế với thị trường Việt Nam.
 
     print(f"\n[Business Analyst Agent] Task: {task}\n")
 
-    while True:
+    MAX_ITERATIONS = 10
+    iteration = 0
+    while iteration < MAX_ITERATIONS:
+        iteration += 1
+        if len(messages) > 7:
+            messages = [initial_message] + messages[-6:]
+
         response = _client.messages.create(
             model=config.CLAUDE_ANALYSIS_MODEL,
             max_tokens=4096,
@@ -241,10 +248,13 @@ Luôn data-driven, actionable, và thực tế với thị trường Việt Nam.
                 if block.type == "tool_use":
                     print(f"\n[Tool] {block.name}...")
                     result = _execute_analyst_tool(block.name, block.input)
+                    result_str = str(result)
+                    if len(result_str) > 2000:
+                        result_str = result_str[:1900] + "... [truncated]"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": str(result),
+                        "content": result_str,
                     })
 
             messages.append({"role": "assistant", "content": response.content})

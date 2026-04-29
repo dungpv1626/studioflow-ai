@@ -183,9 +183,17 @@ Quy tắc bắt buộc:
     MAX_ITERATIONS = 15
     iteration = 0
     collected_images = []  # track tất cả ảnh đã generate
+    # Giữ task gốc riêng để luôn có trong context
+    initial_message = messages[0]
 
     while iteration < MAX_ITERATIONS:
         iteration += 1
+
+        # Trim messages: giữ task gốc + tối đa 6 messages gần nhất
+        # (3 cặp assistant/user) để tránh vượt token limit Gemini (1M tokens)
+        if len(messages) > 7:
+            messages = [initial_message] + messages[-6:]
+
         response = _client.messages.create(
             model=config.CLAUDE_DEFAULT_MODEL,
             max_tokens=4096,
@@ -241,10 +249,14 @@ Quy tắc bắt buộc:
                         result = _execute_tool(block.name, block.input)
                         _log(f"[Tool] Xong: {str(result)[:120]}")
 
+                    # Giới hạn content mỗi tool result ≤ 2000 ký tự tránh phình token
+                    result_str = str(result)
+                    if len(result_str) > 2000:
+                        result_str = result_str[:1900] + "... [truncated]"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": str(result),
+                        "content": result_str,
                     })
 
             messages.append({"role": "assistant", "content": response.content})

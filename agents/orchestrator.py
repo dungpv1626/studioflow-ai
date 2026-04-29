@@ -60,6 +60,7 @@ def run_orchestrator(request: str) -> str:
     - "Tạo kịch bản KOL và brief cho 3 KOL micro trên TikTok"
     """
     messages = [{"role": "user", "content": request}]
+    initial_message = messages[0]
 
     system = [
         {
@@ -87,7 +88,13 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
     print(f"[ORCHESTRATOR] Nhận request: {request}")
     print(f"{'='*60}\n")
 
-    while True:
+    MAX_ITERATIONS = 10
+    iteration = 0
+    while iteration < MAX_ITERATIONS:
+        iteration += 1
+        if len(messages) > 7:
+            messages = [initial_message] + messages[-6:]
+
         response = _client.messages.create(
             model=config.CLAUDE_DEFAULT_MODEL,
             max_tokens=4096,
@@ -121,10 +128,13 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
                     else:
                         result = f"Agent {block.name} không tồn tại"
 
+                    result_str = str(result)
+                    if len(result_str) > 3000:
+                        result_str = result_str[:2900] + "... [truncated]"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": str(result),
+                        "content": result_str,
                     })
 
             messages.append({"role": "assistant", "content": response.content})
