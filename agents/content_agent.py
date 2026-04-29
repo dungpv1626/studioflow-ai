@@ -48,7 +48,7 @@ CONTENT_TOOLS = [
     },
     {
         "name": "generate_image",
-        "description": "Tạo hình ảnh marketing sử dụng Kie AI",
+        "description": "Tạo hình ảnh marketing sử dụng Kie AI. Có thể thêm phụ đề tiếng Việt trực tiếp lên ảnh.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -57,6 +57,10 @@ CONTENT_TOOLS = [
                     "type": "string",
                     "enum": list(IMAGE_PRESETS.keys()),
                     "description": "Dùng preset có sẵn thay vì prompt",
+                },
+                "caption": {
+                    "type": "string",
+                    "description": "Phụ đề tiếng Việt sẽ được in trực tiếp lên ảnh (dải chữ phía dưới)",
                 },
             },
         },
@@ -161,8 +165,9 @@ Bạn là Content Marketing Agent của Studio Flow.
 Quy tắc bắt buộc:
 1. Với mỗi bài viết (Facebook post, blog, ad copy), LUÔN gọi tool generate_image để tạo hình ảnh phù hợp kèm theo.
 2. Ưu tiên dùng preset có sẵn (social_post, hero_banner, feature_invoice, feature_calendar, kol_product, testimonial_bg) nếu phù hợp. Nếu không có preset phù hợp thì dùng custom prompt.
-3. Tạo TOÀN BỘ nội dung yêu cầu trong một lần. Không hỏi lại hay chờ xác nhận giữa chừng.
-4. Sau khi tạo xong tất cả nội dung và hình ảnh, trình bày kết quả đầy đủ.
+3. LUÔN truyền tham số "caption" vào generate_image — đây là phụ đề tiếng Việt sẽ được in trực tiếp lên ảnh. Ví dụ: caption="Studio Flow: Quản lý studio thông minh, tiết kiệm thời gian!"
+4. Tạo TOÀN BỘ nội dung yêu cầu trong một lần. Không hỏi lại hay chờ xác nhận giữa chừng.
+5. Sau khi tạo xong tất cả nội dung và hình ảnh, trình bày kết quả đầy đủ.
 """,
             "cache_control": {"type": "ephemeral"},
         }
@@ -211,6 +216,17 @@ Quy tắc bắt buộc:
                                 img_result = _run_async(generate_marketing_image(block.input["prompt"]))
                             local_path = img_result.get("local_path", "")
                             image_url = img_result.get("image_url", "")
+
+                            # Thêm phụ đề tiếng Việt nếu có
+                            caption = block.input.get("caption", "").strip()
+                            if caption and local_path:
+                                try:
+                                    from skills.brand_assets import add_caption
+                                    add_caption(local_path, caption, local_path)
+                                    _log(f"[Tool] Đã thêm phụ đề: {caption[:60]}")
+                                except Exception as cap_err:
+                                    _log(f"[Tool] Lỗi add_caption: {cap_err}")
+
                             img_bytes = _read_img_bytes(local_path)
                             preset_name = block.input.get("preset") or "custom"
                             if img_bytes or local_path or image_url:
@@ -255,6 +271,16 @@ Quy tắc bắt buộc:
                 _log(f"[Image] Kết quả raw: {str(result)[:200]}")
                 local_path = result.get("local_path", "")
                 image_url = result.get("image_url", "")
+                # Phase 2: thêm phụ đề tự động từ task
+                if local_path:
+                    try:
+                        from skills.brand_assets import add_caption
+                        auto_caption = _make_auto_caption(task)
+                        if auto_caption:
+                            add_caption(local_path, auto_caption, local_path)
+                            _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
+                    except Exception as cap_err:
+                        _log(f"[Image] Lỗi add_caption: {cap_err}")
                 img_bytes = _read_img_bytes(local_path)
                 _log(f"[Image] local_path={local_path[:80] if local_path else 'EMPTY'}")
                 _log(f"[Image] image_url={image_url[:80] if image_url else 'EMPTY'}")
@@ -286,6 +312,22 @@ def _pick_preset_for_task(task: str) -> str:
     if any(k in task_lower for k in ["banner", "website", "landing", "trang chủ"]):
         return "hero_banner"
     return "social_post"  # default
+
+
+def _make_auto_caption(task: str) -> str:
+    """Tạo phụ đề tự động từ task cho Phase 2 fallback."""
+    task_lower = task.lower()
+    if any(k in task_lower for k in ["hóa đơn", "invoice"]):
+        return "Studio Flow: Hóa đơn chuyên nghiệp, quản lý thu chi dễ dàng!"
+    if any(k in task_lower for k in ["lịch hẹn", "calendar", "lịch"]):
+        return "Studio Flow: Quản lý lịch hẹn thông minh — không bỏ lỡ khách hàng nào!"
+    if any(k in task_lower for k in ["kol", "tiktok", "reels"]):
+        return "Studio Flow: Nền tảng quản lý studio hàng đầu Việt Nam"
+    if any(k in task_lower for k in ["pro", "299", "gói"]):
+        return "Studio Flow Pro — Chỉ 299.000đ/tháng, nâng tầm studio của bạn!"
+    if any(k in task_lower for k in ["free", "miễn phí"]):
+        return "Studio Flow: Dùng miễn phí, nâng cấp khi cần — không ràng buộc!"
+    return "Studio Flow: Giải pháp quản lý studio chụp ảnh số 1 Việt Nam"
 
 
 def _count_posts(task: str, final_text: str) -> int:

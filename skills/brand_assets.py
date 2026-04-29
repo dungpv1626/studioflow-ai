@@ -127,6 +127,127 @@ def summarize_assets() -> str:
     return "\n".join(lines)
 
 
+_FONTS_DIR = ASSETS_DIR / "fonts"
+_NOTO_FONT_URL = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"
+_NOTO_BOLD_URL = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"
+
+
+def _get_font(size: int = 36, bold: bool = False):
+    """Load font hỗ trợ tiếng Việt (NotoSans). Tự download nếu chưa có."""
+    from PIL import ImageFont
+
+    _FONTS_DIR.mkdir(parents=True, exist_ok=True)
+    fname = "NotoSans-Bold.ttf" if bold else "NotoSans-Regular.ttf"
+    url = _NOTO_BOLD_URL if bold else _NOTO_FONT_URL
+    font_path = _FONTS_DIR / fname
+
+    if not font_path.exists():
+        try:
+            import httpx
+            r = httpx.get(url, follow_redirects=True, timeout=30)
+            r.raise_for_status()
+            font_path.write_bytes(r.content)
+        except Exception as e:
+            # Fallback: dùng font mặc định PIL (không hỗ trợ tiếng Việt tốt)
+            return ImageFont.load_default()
+
+    try:
+        return ImageFont.truetype(str(font_path), size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def add_caption(
+    image_path: str,
+    caption_text: str,
+    output_path: str | None = None,
+    font_size: int = 36,
+    bar_color: tuple = (15, 32, 68, 220),   # Studio Flow dark blue, semi-transparent
+    text_color: tuple = (255, 255, 255),
+    bar_padding: int = 20,
+) -> str:
+    """
+    Thêm dải chú thích tiếng Việt ở phía dưới ảnh.
+
+    Args:
+        image_path: Đường dẫn ảnh đầu vào
+        caption_text: Văn bản chú thích (hỗ trợ tiếng Việt)
+        output_path: Đường dẫn lưu output (None = ghi đè ảnh gốc)
+        font_size: Cỡ chữ (px)
+        bar_color: RGBA của thanh nền (mặc định xanh Studio Flow)
+        text_color: RGB màu chữ
+        bar_padding: Khoảng cách lề trong thanh
+    Returns:
+        output_path
+    """
+    from PIL import Image, ImageDraw
+
+    if output_path is None:
+        output_path = image_path
+
+    img = Image.open(image_path).convert("RGBA")
+    draw = ImageDraw.Draw(img)
+
+    font = _get_font(font_size, bold=False)
+
+    # Wrap text theo chiều rộng ảnh
+    max_width = img.width - bar_padding * 2
+    lines = _wrap_text(draw, caption_text, font, max_width)
+
+    # Tính chiều cao thanh
+    line_h = font_size + 8
+    bar_h = line_h * len(lines) + bar_padding * 2
+
+    # Vẽ thanh nền bán trong suốt
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    bar_draw = ImageDraw.Draw(overlay)
+    bar_draw.rectangle(
+        [(0, img.height - bar_h), (img.width, img.height)],
+        fill=bar_color,
+    )
+    img = Image.alpha_composite(img, overlay)
+
+    # Vẽ text
+    draw = ImageDraw.Draw(img)
+    y = img.height - bar_h + bar_padding
+    for line in lines:
+        # Căn giữa mỗi dòng
+        try:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            tw = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(line) * (font_size // 2)
+        x = (img.width - tw) // 2
+        draw.text((x, y), line, font=font, fill=text_color)
+        y += line_h
+
+    img.convert("RGB").save(output_path, quality=95)
+    return output_path
+
+
+def _wrap_text(draw, text: str, font, max_width: int) -> list[str]:
+    """Ngắt dòng text cho vừa max_width."""
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        test = (current + " " + word).strip()
+        try:
+            bbox = draw.textbbox((0, 0), test, font=font)
+            w = bbox[2] - bbox[0]
+        except Exception:
+            w = len(test) * 18  # rough estimate
+        if w <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines if lines else [text]
+
+
 def overlay_logo(
     base_image_path: str,
     output_path: str,
