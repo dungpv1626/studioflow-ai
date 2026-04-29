@@ -1,0 +1,41 @@
+# === BẢO MẬT - KHÔNG COMMIT ===
+.env
+.env.local
+.env.production
+*.key
+*.pem
+secrets/
+.streamlit/secrets.toml
+
+# === PYTHON ===
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# === LOGS & OUTPUT ===
+logs/
+*.log
+output/
+exports/
+generated_images/
+
+# === IDE ===
+.vscode/settings.json
+.idea/
+*.swp
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === NODE (nếu dùng JS tools) ===
+node_modules/
+.npm/

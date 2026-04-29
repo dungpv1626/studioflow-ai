@@ -1,0 +1,520 @@
+"""
+Studio Flow AI Marketing Dashboard
+Giao diện web đơn giản để sử dụng hệ thống AI Agent
+"""
+import sys
+import os
+import asyncio
+from pathlib import Path
+
+# Thêm project root vào sys.path
+sys.path.insert(0, str(Path(__file__).parent))
+
+import streamlit as st
+
+# ─── Cấu hình trang ───────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Studio Flow AI",
+    page_icon="📸",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ─── Bridge: load secrets từ st.secrets vào os.environ ───────────────────────
+def _load_secrets():
+    try:
+        keys = st.secrets.get("api_keys", {})
+        for k in ["GEMINI_API_KEY", "KIE_AI_API_KEY", "APIFY_API_TOKEN"]:
+            if k in keys and not os.environ.get(k):
+                os.environ[k] = keys[k]
+    except Exception:
+        pass
+
+_load_secrets()
+
+# ─── Đăng nhập ────────────────────────────────────────────────────────────────
+def _check_login() -> bool:
+    try:
+        correct_pw = st.secrets.get("auth", {}).get("password", "")
+    except Exception:
+        correct_pw = ""
+
+    if not correct_pw:
+        return True  # Không cấu hình password → bỏ qua login
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.markdown("""
+    <div style="max-width:380px;margin:80px auto;padding:40px;
+    background:#1a3a6e;border-radius:16px;text-align:center">
+        <h2 style="color:#00d4ff;margin-bottom:8px">📸 Studio Flow AI</h2>
+        <p style="color:#b0c4de;margin-bottom:24px">Đăng nhập để sử dụng</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        pw = st.text_input("Mật khẩu", type="password", key="login_pw")
+        if st.button("Đăng nhập", use_container_width=True, type="primary"):
+            if pw == correct_pw:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("Sai mật khẩu")
+    return False
+
+if not _check_login():
+    st.stop()
+
+# ─── CSS tuỳ chỉnh ────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(135deg, #0f2044 0%, #1a3a6e 100%);
+        padding: 20px 30px;
+        border-radius: 12px;
+        margin-bottom: 24px;
+        color: white;
+    }
+    .main-header h1 { color: #00d4ff; margin: 0; font-size: 1.8rem; }
+    .main-header p  { color: #b0c4de; margin: 4px 0 0; font-size: 0.95rem; }
+    .example-btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .stButton > button { border-radius: 8px; }
+    .output-box {
+        background: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 20px;
+        margin-top: 16px;
+        min-height: 200px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── Header ───────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="main-header">
+    <h1>📸 Studio Flow AI Marketing</h1>
+    <p>Hệ thống AI Agent thay thế phòng Marketing & Business Analysis</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ─── Sidebar: API Key ─────────────────────────────────────────────────────────
+with st.sidebar:
+    st.image("https://studioflow.vn/favicon.ico", width=40)
+    st.markdown("### ⚙️ Cấu hình")
+
+    # Đọc key từ .env hoặc để user nhập
+    from dotenv import load_dotenv
+    load_dotenv()
+    env_key = os.getenv("GEMINI_API_KEY", "")
+
+    if env_key:
+        st.success("✅ GEMINI_API_KEY đã có trong .env")
+        api_key = env_key
+    else:
+        api_key = st.text_input(
+            "GEMINI_API_KEY",
+            type="password",
+            placeholder="AIza...",
+            help="Lấy miễn phí tại aistudio.google.com/apikey",
+        )
+        if api_key:
+            os.environ["GEMINI_API_KEY"] = api_key
+            st.success("✅ Key đã được set")
+        else:
+            st.warning("⚠️ Cần nhập Gemini API key để dùng AI Agents")
+
+    st.markdown("---")
+    st.markdown("### 📌 Hướng dẫn nhanh")
+    st.markdown("""
+1. Chọn **tab** phù hợp với việc cần làm
+2. Gõ yêu cầu vào ô text (hoặc bấm ví dụ)
+3. Bấm **Chạy** và chờ kết quả
+4. Copy kết quả để dùng
+    """)
+    st.markdown("---")
+    st.markdown("**Studio Flow** · [studioflow.vn](https://studioflow.vn)")
+    st.markdown("Founder: Dũng Phạm · 0965867228")
+    st.markdown("---")
+    if st.button("🚪 Đăng xuất", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+
+# ─── Helper: chạy agent an toàn ───────────────────────────────────────────────
+def run_agent_safe(agent_fn, task: str) -> str:
+    if not os.getenv("GEMINI_API_KEY"):
+        return "❌ Chưa có GEMINI_API_KEY. Vui lòng nhập ở sidebar trái."
+    try:
+        return agent_fn(task)
+    except Exception as e:
+        return f"❌ Lỗi: {e}"
+
+
+def run_async(coro):
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+# ─── Tabs chính ───────────────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🤖 Orchestrator",
+    "✍️ Content Agent",
+    "🎬 KOL Agent",
+    "📊 Business Analyst",
+    "🖼️ Tạo hình ảnh",
+    "🗂️ Brand Assets",
+])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1: Orchestrator
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
+    st.markdown("### 🤖 Orchestrator — Giao việc tự do")
+    st.caption("Giao việc bằng tiếng Việt tự nhiên, AI tự phân công cho agent phù hợp")
+
+    ORCH_EXAMPLES = [
+        "Viết 3 bài Facebook về tính năng hóa đơn tuần này",
+        "Kịch bản TikTok 60s cho KOL nhiếp ảnh cưới + brief gửi KOL",
+        "Phân tích đối thủ cạnh tranh và chiến lược tăng 100 user Pro tháng tới",
+        "Content calendar tháng 5: 4 bài/tuần + 1 blog SEO",
+    ]
+
+    st.markdown("**Ví dụ nhanh:**")
+    cols = st.columns(2)
+    for i, ex in enumerate(ORCH_EXAMPLES):
+        if cols[i % 2].button(ex, key=f"orch_{i}", use_container_width=True):
+            st.session_state["orch_task"] = ex
+
+    task_orch = st.text_area(
+        "Yêu cầu của bạn",
+        value=st.session_state.get("orch_task", ""),
+        height=120,
+        placeholder="Ví dụ: Chuẩn bị nội dung marketing cho tuần tới...",
+        key="orch_input",
+    )
+
+    if st.button("🚀 Chạy Orchestrator", type="primary", use_container_width=True, key="btn_orch"):
+        if task_orch.strip():
+            with st.spinner("Đang xử lý..."):
+                from agents.orchestrator import run_orchestrator
+                result = run_agent_safe(run_orchestrator, task_orch)
+            st.markdown("---")
+            st.markdown("#### Kết quả")
+            st.markdown(result)
+        else:
+            st.warning("Vui lòng nhập yêu cầu")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2: Content Agent
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.markdown("### ✍️ Content Agent — Nội dung Marketing")
+    st.caption("Viết bài Facebook, blog SEO, email, ad copy, lịch nội dung")
+
+    CONTENT_EXAMPLES = [
+        "Viết bài Facebook giới thiệu tính năng quản lý lịch hẹn, tone vui vẻ có emoji",
+        "Viết blog SEO: 'Phần mềm quản lý studio chụp ảnh tốt nhất 2025'",
+        "Tạo email onboarding cho user mới đăng ký Free, 3 email theo sequence",
+        "Viết ad copy Facebook Ads cho gói Pro 299k, mục tiêu conversion",
+        "Content calendar tháng 5 với 4 bài/tuần, mix educational và promotional",
+    ]
+
+    st.markdown("**Ví dụ nhanh:**")
+    cols = st.columns(2)
+    for i, ex in enumerate(CONTENT_EXAMPLES):
+        if cols[i % 2].button(ex, key=f"ct_{i}", use_container_width=True):
+            st.session_state["content_task"] = ex
+
+    task_content = st.text_area(
+        "Yêu cầu nội dung",
+        value=st.session_state.get("content_task", ""),
+        height=120,
+        placeholder="Ví dụ: Viết 2 bài Facebook về tính năng hóa đơn...",
+        key="content_input",
+    )
+
+    if st.button("✍️ Tạo nội dung", type="primary", use_container_width=True, key="btn_content"):
+        if task_content.strip():
+            if not os.getenv("GEMINI_API_KEY"):
+                st.error("❌ Chưa có GEMINI_API_KEY.")
+            else:
+                from agents.content_agent import run_content_agent
+                log_box = st.empty()
+                log_lines = []
+
+                def on_progress(msg):
+                    log_lines.append(msg)
+                    log_box.text("\n".join(log_lines[-12:]))
+
+                with st.spinner("Đang tạo nội dung + hình ảnh (có thể mất 2-4 phút)..."):
+                    try:
+                        result_text, result_images = run_content_agent(task_content, on_progress=on_progress)
+                    except Exception as e:
+                        result_text, result_images = f"❌ Lỗi: {e}", []
+
+                log_box.empty()
+                st.markdown("---")
+                st.markdown("#### Kết quả")
+                st.markdown(result_text)
+
+                # Hiển thị ảnh (local path có logo hoặc URL)
+                if result_images:
+                    st.markdown("---")
+                    st.markdown("#### 🖼️ Hình ảnh đã tạo (có logo Studio Flow)")
+                    img_cols = st.columns(min(len(result_images), 3))
+                    for i, (preset, img_ref) in enumerate(result_images):
+                        with img_cols[i % 3]:
+                            try:
+                                st.image(img_ref, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
+                                st.caption(f"`{img_ref}`")
+                            except Exception:
+                                st.markdown(f"[Xem ảnh]({img_ref})")
+
+                st.download_button(
+                    "💾 Tải xuống (.txt)",
+                    data=result_text.encode("utf-8"),
+                    file_name="content_output.txt",
+                    mime="text/plain",
+                )
+        else:
+            st.warning("Vui lòng nhập yêu cầu")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3: KOL Agent
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("### 🎬 KOL Agent — Kịch bản & Chiến lược Influencer")
+    st.caption("Kịch bản TikTok/Reels/YouTube, brief KOL, tin nhắn outreach")
+
+    KOL_EXAMPLES = [
+        "Kịch bản TikTok 60s, KOL chủ studio ảnh cưới HN, concept: app đã thay đổi studio tôi",
+        "Kịch bản Facebook Live 30 phút demo Studio Flow, host là founder Dũng Phạm",
+        "Brief cho KOL micro TikTok (50k followers), campaign ra mắt tính năng GPS Check-in",
+        "Viết DM tiếp cận KOL @photographyvn 80k followers trên TikTok",
+        "Kịch bản YouTube review 10 phút Studio Flow vs đối thủ, khách quan",
+    ]
+
+    st.markdown("**Ví dụ nhanh:**")
+    cols = st.columns(2)
+    for i, ex in enumerate(KOL_EXAMPLES):
+        if cols[i % 2].button(ex, key=f"kol_{i}", use_container_width=True):
+            st.session_state["kol_task"] = ex
+
+    task_kol = st.text_area(
+        "Yêu cầu KOL",
+        value=st.session_state.get("kol_task", ""),
+        height=120,
+        placeholder="Ví dụ: Tạo kịch bản TikTok 60s cho KOL nhiếp ảnh...",
+        key="kol_input",
+    )
+
+    if st.button("🎬 Tạo kịch bản / Brief", type="primary", use_container_width=True, key="btn_kol"):
+        if task_kol.strip():
+            with st.spinner("Đang tạo kịch bản..."):
+                from agents.kol_agent import run_kol_agent
+                result = run_agent_safe(run_kol_agent, task_kol)
+            st.markdown("---")
+            st.markdown("#### Kết quả")
+            st.markdown(result)
+            st.download_button(
+                "💾 Tải xuống (.txt)",
+                data=result.encode("utf-8"),
+                file_name="kol_output.txt",
+                mime="text/plain",
+            )
+        else:
+            st.warning("Vui lòng nhập yêu cầu")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4: Business Analyst
+# ══════════════════════════════════════════════════════════════════════════════
+with tab4:
+    st.markdown("### 📊 Business Analyst — Phân tích & Chiến lược")
+    st.caption("Phân tích đối thủ, khách hàng, tạo chiến lược tăng trưởng, báo cáo")
+
+    BA_EXAMPLES = [
+        "Phân tích top 3 đối thủ của Studio Flow tại Việt Nam",
+        "Tại sao user Free không chuyển lên Pro? Đề xuất giải pháp",
+        "Chiến lược tăng trưởng Q3 2025, mục tiêu tăng gấp đôi user Pro",
+        "Tạo báo cáo tuần: tuần 17/2025, highlight ra mắt tính năng mới",
+        "Phân tích phân khúc chủ studio ảnh cưới và cách tiếp cận hiệu quả",
+    ]
+
+    st.markdown("**Ví dụ nhanh:**")
+    cols = st.columns(2)
+    for i, ex in enumerate(BA_EXAMPLES):
+        if cols[i % 2].button(ex, key=f"ba_{i}", use_container_width=True):
+            st.session_state["ba_task"] = ex
+
+    task_ba = st.text_area(
+        "Yêu cầu phân tích",
+        value=st.session_state.get("ba_task", ""),
+        height=120,
+        placeholder="Ví dụ: Phân tích đối thủ cạnh tranh và chiến lược...",
+        key="ba_input",
+    )
+
+    if st.button("📊 Phân tích", type="primary", use_container_width=True, key="btn_ba"):
+        if task_ba.strip():
+            with st.spinner("Đang phân tích... (có thể mất 30-60 giây)"):
+                from agents.business_analyst_agent import run_business_analyst_agent
+                result = run_agent_safe(run_business_analyst_agent, task_ba)
+            st.markdown("---")
+            st.markdown("#### Kết quả")
+            st.markdown(result)
+            st.download_button(
+                "💾 Tải xuống (.txt)",
+                data=result.encode("utf-8"),
+                file_name="analysis_output.txt",
+                mime="text/plain",
+            )
+        else:
+            st.warning("Vui lòng nhập yêu cầu")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5: Image Generation
+# ══════════════════════════════════════════════════════════════════════════════
+with tab5:
+    st.markdown("### 🖼️ Tạo hình ảnh — Pollinations.AI")
+    st.caption("Miễn phí, không cần API key, tạo ảnh ngay lập tức")
+
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        st.markdown("**Chọn preset có sẵn:**")
+        from skills.image_generation import IMAGE_PRESETS
+        preset_labels = {
+            "hero_banner": "🏠 Hero Banner (trang chủ)",
+            "feature_invoice": "🧾 Tính năng Hóa đơn",
+            "feature_calendar": "📅 Tính năng Lịch hẹn",
+            "kol_product": "📱 KOL cầm điện thoại",
+            "social_post": "📣 Social Media Post",
+            "testimonial_bg": "💬 Background Testimonial",
+        }
+        selected_preset = st.selectbox(
+            "Preset",
+            options=["(Không dùng preset)"] + list(IMAGE_PRESETS.keys()),
+            format_func=lambda x: preset_labels.get(x, x),
+        )
+
+        st.markdown("**Hoặc nhập prompt tuỳ chỉnh:**")
+        custom_prompt = st.text_area(
+            "Mô tả hình ảnh",
+            height=100,
+            placeholder="Ví dụ: Vietnamese wedding photographer using Studio Flow app on phone, professional studio background, warm lighting",
+            disabled=(selected_preset != "(Không dùng preset)"),
+        )
+
+        col_w, col_h = st.columns(2)
+        width = col_w.selectbox("Chiều rộng", [512, 768, 1024, 1280, 1536, 1792], index=2)
+        height = col_h.selectbox("Chiều cao", [512, 768, 1024, 1280, 1536, 1792], index=2)
+
+        model = st.selectbox("Model", ["flux", "turbo", "dreamshaper"], index=0)
+
+        save_local = st.checkbox("Lưu file local vào output/")
+
+    with col_right:
+        st.markdown("**Xem trước:**")
+        preview_placeholder = st.empty()
+
+        if st.button("🖼️ Tạo hình ảnh", type="primary", use_container_width=True, key="btn_img"):
+            from skills.image_generation import generate_marketing_image, generate_preset_image
+
+            output_path = None
+            if save_local:
+                import time
+                fname = f"output/img_{int(time.time())}.png"
+                Path("output").mkdir(exist_ok=True)
+                output_path = fname
+
+            with st.spinner("Đang tạo hình ảnh..."):
+                if selected_preset != "(Không dùng preset)":
+                    result = run_async(generate_preset_image(selected_preset, output_path))
+                elif custom_prompt.strip():
+                    result = run_async(generate_marketing_image(
+                        custom_prompt, width=width, height=height,
+                        model=model, output_path=output_path,
+                    ))
+                else:
+                    st.warning("Chọn preset hoặc nhập prompt")
+                    result = None
+
+            if result:
+                preview_placeholder.image(result["image_url"], use_container_width=True)
+                st.success("✅ Tạo ảnh thành công!")
+                st.markdown(f"**URL:** `{result['image_url']}`")
+                if result.get("local_path"):
+                    st.info(f"Đã lưu: `{result['local_path']}`")
+                st.code(result["image_url"], language=None)
+
+        else:
+            preview_placeholder.markdown(
+                "<div style='background:#f0f2f6;border-radius:10px;height:300px;"
+                "display:flex;align-items:center;justify-content:center;color:#888'>"
+                "Hình ảnh sẽ hiển thị ở đây</div>",
+                unsafe_allow_html=True,
+            )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6: Brand Assets
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    st.markdown("### 🗂️ Brand Assets — Logo, Template & Infographic")
+    st.caption("Quản lý tài nguyên thương hiệu Studio Flow. Copy file vào thư mục `assets/` để sử dụng.")
+
+    from skills.brand_assets import list_available_assets, list_missing_assets, ASSETS_DIR, ASSET_CATALOG
+
+    available = list_available_assets()
+    missing = list_missing_assets()
+
+    # Metrics tổng quan
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Tổng assets", len(ASSET_CATALOG))
+    col2.metric("Đã upload", len(available), delta=f"{len(available)}/{len(ASSET_CATALOG)}")
+    col3.metric("Còn thiếu", len(missing), delta=f"-{len(missing)}" if missing else "0", delta_color="inverse")
+
+    st.markdown(f"📁 **Đường dẫn thư mục:** `{ASSETS_DIR}`")
+    st.markdown("---")
+
+    # Hiển thị assets đã có theo category
+    for category, label in [("logo", "🎨 Logo"), ("templates", "📐 Templates"), ("infographics", "📊 Infographics")]:
+        cat_assets = {k: v for k, v in available.items() if v["category"] == category}
+        if cat_assets:
+            st.markdown(f"#### {label} ({len(cat_assets)} files)")
+            cols = st.columns(3)
+            for idx, (key, info) in enumerate(cat_assets.items()):
+                with cols[idx % 3]:
+                    path = info["path"]
+                    ext = path.lower().split(".")[-1]
+                    if ext in ("png", "jpg", "jpeg", "webp"):
+                        st.image(path, caption=f"{key}\n{info['size_kb']}KB", use_container_width=True)
+                    else:
+                        st.markdown(f"**{key}**  \n{info['description']}  \n`{info['size_kb']}KB`")
+            st.markdown("")
+
+    # Hiển thị assets còn thiếu
+    if missing:
+        st.markdown("---")
+        st.markdown("#### ⚠️ Chưa upload")
+        st.caption(f"Copy các file sau vào đúng thư mục `assets/`")
+        for m in missing:
+            st.markdown(f"- `{m}`")
+    else:
+        st.success("✅ Tất cả assets đã được upload đầy đủ!")
