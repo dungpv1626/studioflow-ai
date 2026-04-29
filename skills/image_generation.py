@@ -40,82 +40,106 @@ async def generate_marketing_image(
     resolution: str = "1K",
 ) -> dict:
     """
-    Tạo hình ảnh marketing qua Kie AI.
-
-    Returns:
-        dict: image_url, local_path, prompt_used, task_id
+    Tạo hình ảnh marketing. Ưu tiên Kie AI, fallback sang Pollinations.AI.
+    Returns: dict với img_bytes (đã overlay logo), image_url, local_path, prompt_used
     """
-    # KHÔNG thêm tên thương hiệu vào prompt — tránh AI tự vẽ logo sai
-    # Logo thật được overlay bằng Pillow sau khi generate
-    branded_prompt = f"{prompt}, professional photography studio, Vietnam, high quality"
+    branded_prompt = f"{prompt}, professional photography studio, Vietnam, high quality, no text, no logo"
 
-    # Đọc API key tại thời điểm gọi hàm (sau khi app.py đã bridge secrets vào os.environ)
+    raw_bytes = None
+    image_url = ""
+    source = "none"
+
+    # ── Bước 1: Thử Kie AI ────────────────────────────────────────────────────
     kie_api_key = os.getenv("KIE_AI_API_KEY", "")
-    if not kie_api_key:
-        raise ValueError("KIE_AI_API_KEY chưa được cấu hình. Kiểm tra .env hoặc Streamlit secrets.")
+    if kie_api_key:
+        try:
+            headers = {
+                "Authorization": f"Bearer {kie_api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": model,
+                "input": {
+                    "prompt": branded_prompt,
+                    "aspect_ratio": ASPECT_MAP.get(aspect_ratio, "1:1"),
+                    "resolution": resolution,
+                },
+            }
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(f"{KIE_BASE}/api/v1/jobs/createTask", headers=headers, json=payload)
+                r.raise_for_status()
+                data = r.json()
+                task_id = (data.get("data") or {}).get("taskId") or data.get("taskId")
+                if not task_id:
+                    raise ValueError(f"Không lấy được taskId: {data}")
+                image_url = await _poll_task(client, headers, task_id, max_wait=150)
 
-    headers = {
-        "Authorization": f"Bearer {kie_api_key}",
-        "Content-Type": "application/json",
-    }
+            if image_url:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    r = await client.get(image_url)
+                    r.raise_for_status()
+                raw_bytes = r.content
+                source = "kie_ai"
+                print(f"[Image] Kie AI thành công: {len(raw_bytes)} bytes")
+        except Exception as e:
+            print(f"[Image] Kie AI thất bại: {e}. Chuyển sang Pollinations...")
+    else:
+        print("[Image] KIE_AI_API_KEY không có, dùng Pollinations thẳng.")
 
-    payload = {
-        "model": model,
-        "input": {
-            "prompt": branded_prompt,
-            "aspect_ratio": ASPECT_MAP.get(aspect_ratio, "1:1"),
-            "resolution": resolution,
-        },
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Bước 1: Tạo task
-        r = await client.post(f"{KIE_BASE}/api/v1/jobs/createTask", headers=headers, json=payload)
-        r.raise_for_status()
-        data = r.json()
-        if not isinstance(data, dict):
-            raise ValueError(f"Unexpected response (not a dict): {data!r}")
-
-        task_id = (data.get("data") or {}).get("taskId") or data.get("taskId")
-        if not task_id:
-            raise ValueError(f"Không lấy được taskId: {data}")
-
-        # Bước 2: Poll kết quả (tối đa 3 phút)
-        image_url = await _poll_task(client, headers, task_id, max_wait=180)
+    # ── Bước 2: Fallback sang Pollinations.AI (miễn phí, không cần API key) ───
+    if not raw_bytes:
+        try:
+            raw_bytes = await _generate_via_pollinations(branded_prompt, aspect_ratio)
+            source = "pollinations"
+            print(f"[Image] Pollinations thành công: {len(raw_bytes)} bytes")
+        except Exception as e:
+            print(f"[Image] Pollinations thất bại: {e}")
 
     result = {
         "image_url": image_url,
         "prompt_used": branded_prompt,
         "local_path": None,
         "img_bytes": None,
-        "task_id": task_id,
+        "source": source,
     }
 
-    if image_url:
-        # Download ảnh về memory
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.get(image_url)
-            r.raise_for_status()
-
-        raw_bytes = r.content
-
-        # Overlay logo hoàn toàn trong bộ nhớ (không phụ thuộc disk path)
+    if raw_bytes:
         img_bytes_with_logo = _overlay_logo_in_memory(raw_bytes)
         result["img_bytes"] = img_bytes_with_logo
 
-        # Vẫn lưu xuống disk để dùng add_caption sau nếu cần
         try:
-            if output_path:
-                save_path = str(Path(output_path).resolve())
-            else:
-                _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-                save_path = str(_OUTPUT_DIR / f"gen_{task_id[:8]}.jpg")
-            Path(save_path).write_bytes(img_bytes_with_logo)
-            result["local_path"] = save_path
+            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            save_name = output_path or str(_OUTPUT_DIR / f"gen_{source}_{abs(hash(branded_prompt)) % 99999:05d}.jpg")
+            Path(save_name).write_bytes(img_bytes_with_logo)
+            result["local_path"] = save_name
         except Exception as _save_err:
-            print(f"[Image save to disk failed] {_save_err}")
+            print(f"[Image save] {_save_err}")
 
     return result
+
+
+async def _generate_via_pollinations(prompt: str, aspect_ratio: str = "1:1") -> bytes:
+    """Tạo ảnh qua Pollinations.AI — miễn phí, không cần API key."""
+    import urllib.parse
+
+    size_map = {
+        "1:1":  (1024, 1024),
+        "16:9": (1280, 720),
+        "9:16": (720, 1280),
+        "4:3":  (1024, 768),
+        "3:4":  (768, 1024),
+    }
+    w, h = size_map.get(aspect_ratio, (1024, 1024))
+
+    encoded = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&nologo=true&seed={abs(hash(prompt)) % 9999}"
+
+    async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        if not r.content or len(r.content) < 1000:
+            raise ValueError(f"Pollinations trả về ảnh quá nhỏ: {len(r.content)} bytes")
+        return r.content
 
 
 def _overlay_logo_in_memory(raw_bytes: bytes) -> bytes:

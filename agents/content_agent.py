@@ -121,7 +121,7 @@ def _run_async(coro):
     if loop and loop.is_running():
         with concurrent.futures.ThreadPoolExecutor() as pool:
             future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=120)
+            return future.result(timeout=300)  # 5 phút: Kie AI 150s + Pollinations 90s
     else:
         return asyncio.run(coro)
 
