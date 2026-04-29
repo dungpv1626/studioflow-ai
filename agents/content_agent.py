@@ -11,7 +11,7 @@ from skills.content_writing import (
     write_ad_copy,
     generate_content_calendar,
 )
-from skills.image_generation import generate_marketing_image, generate_preset_image, IMAGE_PRESETS
+from skills.image_generation import generate_image_sync, IMAGE_PRESETS
 
 _client = get_client()
 
@@ -132,18 +132,6 @@ def _execute_tool(tool_name: str, tool_input: dict) -> str:
         return write_facebook_post(**tool_input)
     elif tool_name == "write_blog_article":
         return write_blog_article(**tool_input)
-    elif tool_name == "generate_image":
-        try:
-            if "preset" in tool_input:
-                from skills.image_generation import generate_preset_image
-                result = _run_async(generate_preset_image(tool_input["preset"]))
-            else:
-                result = _run_async(generate_marketing_image(tool_input["prompt"]))
-            # Ưu tiên local_path (đã có logo), fallback sang image_url
-            img_ref = result.get("local_path") or result.get("image_url", "")
-            return f"Image URL: {img_ref}"
-        except Exception as e:
-            return f"[Image generation failed: {e}]"
     elif tool_name == "write_ad_copy":
         return write_ad_copy(**tool_input)
     elif tool_name == "generate_content_calendar":
@@ -259,8 +247,11 @@ Quy tắc:
 
     for i in range(n):
         try:
-            _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
-            result = _run_async(generate_preset_image(preset))
+            _log(f"[Image] Đang tạo ảnh {i+1}/{n} (preset={preset})...")
+            # Dùng generate_image_sync (sync httpx.Client) — tránh asyncio threading issues trên Streamlit Cloud
+            p = IMAGE_PRESETS.get(preset, IMAGE_PRESETS["social_post"])
+            result = generate_image_sync(p["prompt"], aspect_ratio=p.get("aspect_ratio", "1:1"))
+            _log(f"[Image] Source: {result.get('source', '?')}")
             local_path = result.get("local_path", "")
             image_url = result.get("image_url", "")
             img_bytes = result.get("img_bytes")

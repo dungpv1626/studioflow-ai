@@ -200,6 +200,117 @@ def _overlay_logo_in_memory(raw_bytes: bytes) -> bytes:
         return raw_bytes
 
 
+def generate_image_sync(prompt: str, aspect_ratio: str = "1:1") -> dict:
+    """
+    Phiên bản ĐỒNG BỘ (sync) của generate_marketing_image.
+    Dùng httpx.Client thay vì AsyncClient — tránh mọi vấn đề asyncio/thread trên Streamlit Cloud.
+    Ưu tiên Kie AI → Pollinations fallback. Trả về dict với img_bytes đã overlay logo.
+    """
+    import time as _time
+    import urllib.parse
+
+    branded_prompt = f"{prompt}, professional photography studio, Vietnam, high quality, no text, no logo"
+    raw_bytes = None
+    image_url = ""
+    source = "none"
+
+    # ── Thử Kie AI (sync) ─────────────────────────────────────────────────────
+    kie_api_key = os.getenv("KIE_AI_API_KEY", "")
+    if kie_api_key:
+        try:
+            headers_kie = {
+                "Authorization": f"Bearer {kie_api_key}",
+                "Content-Type": "application/json",
+            }
+            size_map = {"1:1": "1:1", "16:9": "16:9", "9:16": "9:16", "4:3": "4:3", "3:4": "3:4"}
+            payload = {
+                "model": "nano-banana-2",
+                "input": {
+                    "prompt": branded_prompt,
+                    "aspect_ratio": size_map.get(aspect_ratio, "1:1"),
+                    "resolution": "1K",
+                },
+            }
+            with httpx.Client(timeout=30.0) as client:
+                r = client.post(f"{KIE_BASE}/api/v1/jobs/createTask", headers=headers_kie, json=payload)
+                r.raise_for_status()
+                data = r.json()
+                task_id = (data.get("data") or {}).get("taskId") or data.get("taskId")
+                if not task_id:
+                    raise ValueError(f"Không lấy được taskId: {data}")
+
+            # Poll Kie AI (sync)
+            poll_url = f"{KIE_BASE}/api/v1/jobs/recordInfo"
+            elapsed = 0
+            with httpx.Client(timeout=15.0) as client:
+                while elapsed < 150:
+                    _time.sleep(4)
+                    elapsed += 4
+                    try:
+                        pr = client.get(poll_url, headers=headers_kie, params={"taskId": task_id})
+                        if pr.status_code == 200:
+                            pdata = pr.json().get("data", {})
+                            state = pdata.get("state", "")
+                            if state == "success":
+                                result_json = __import__("json").loads(pdata.get("resultJson", "{}"))
+                                urls = result_json.get("resultUrls", [])
+                                if urls:
+                                    image_url = urls[0]
+                                    break
+                            elif state == "fail":
+                                raise ValueError(f"Kie AI task fail: {pdata.get('failMsg')}")
+                    except Exception:
+                        pass
+
+            if image_url:
+                with httpx.Client(timeout=60.0) as client:
+                    r = client.get(image_url, follow_redirects=True)
+                    r.raise_for_status()
+                    raw_bytes = r.content
+                    source = "kie_ai"
+                    print(f"[Image sync] Kie AI OK: {len(raw_bytes)} bytes")
+        except Exception as e:
+            print(f"[Image sync] Kie AI thất bại: {e}")
+    else:
+        print("[Image sync] Không có KIE_AI_API_KEY, dùng Pollinations")
+
+    # ── Fallback: Pollinations (sync, không cần API key) ──────────────────────
+    if not raw_bytes:
+        try:
+            size_map2 = {"1:1": (1024, 1024), "16:9": (1280, 720), "9:16": (720, 1280)}
+            w, h = size_map2.get(aspect_ratio, (1024, 1024))
+            encoded = urllib.parse.quote(branded_prompt)
+            seed = abs(hash(branded_prompt)) % 9999
+            poll_url = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&nologo=true&seed={seed}"
+            with httpx.Client(timeout=90.0, follow_redirects=True) as client:
+                r = client.get(poll_url)
+                r.raise_for_status()
+                if len(r.content) > 1000:
+                    raw_bytes = r.content
+                    source = "pollinations"
+                    print(f"[Image sync] Pollinations OK: {len(raw_bytes)} bytes")
+                else:
+                    raise ValueError(f"Pollinations trả về quá nhỏ: {len(r.content)} bytes")
+        except Exception as e:
+            print(f"[Image sync] Pollinations thất bại: {e}")
+
+    result = {"image_url": image_url, "prompt_used": branded_prompt,
+              "local_path": None, "img_bytes": None, "source": source}
+
+    if raw_bytes:
+        img_with_logo = _overlay_logo_in_memory(raw_bytes)
+        result["img_bytes"] = img_with_logo
+        try:
+            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            save_path = str(_OUTPUT_DIR / f"gen_{source}_{abs(hash(branded_prompt)) % 99999:05d}.jpg")
+            Path(save_path).write_bytes(img_with_logo)
+            result["local_path"] = save_path
+        except Exception:
+            pass
+
+    return result
+
+
 async def _poll_task(client: httpx.AsyncClient, headers: dict, task_id: str, max_wait: int = 180) -> str:
     """Poll GET /api/v1/jobs/recordInfo cho đến khi xong hoặc timeout."""
     url = f"{KIE_BASE}/api/v1/jobs/recordInfo"
