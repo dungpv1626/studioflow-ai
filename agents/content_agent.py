@@ -11,7 +11,7 @@ from skills.content_writing import (
     write_ad_copy,
     generate_content_calendar,
 )
-from skills.image_generation import generate_marketing_image, IMAGE_PRESETS
+from skills.image_generation import generate_marketing_image, generate_preset_image, IMAGE_PRESETS
 
 _client = get_client()
 
@@ -211,7 +211,52 @@ Quy tắc bắt buộc:
         if hasattr(block, "text"):
             final_text += block.text
 
+    # Phase 2: Nếu Gemini không gọi generate_image → tự động tạo ảnh
+    if not collected_images and final_text.strip():
+        _log("\n[Image] Gemini không gọi tool → tự động tạo ảnh...")
+        preset = _pick_preset_for_task(task)
+        n = _count_posts(task, final_text)
+        for i in range(n):
+            try:
+                _log(f"[Image] Đang tạo ảnh {i+1}/{n} (preset: {preset})...")
+                result = _run_async(generate_preset_image(preset))
+                img_ref = result.get("local_path") or result.get("image_url", "")
+                collected_images.append((preset, img_ref))
+                _log(f"[Image] Ảnh {i+1} xong")
+            except Exception as e:
+                _log(f"[Image] Lỗi ảnh {i+1}: {e}")
+
     return final_text, collected_images
+
+
+def _pick_preset_for_task(task: str) -> str:
+    """Chọn preset ảnh phù hợp dựa trên từ khoá trong task."""
+    task_lower = task.lower()
+    if any(k in task_lower for k in ["hóa đơn", "invoice", "thanh toán"]):
+        return "feature_invoice"
+    if any(k in task_lower for k in ["lịch hẹn", "calendar", "lịch", "appointment"]):
+        return "feature_calendar"
+    if any(k in task_lower for k in ["kol", "tiktok", "reels", "video"]):
+        return "kol_product"
+    if any(k in task_lower for k in ["testimonial", "review", "đánh giá"]):
+        return "testimonial_bg"
+    if any(k in task_lower for k in ["banner", "website", "landing", "trang chủ"]):
+        return "hero_banner"
+    return "social_post"  # default
+
+
+def _count_posts(task: str, final_text: str) -> int:
+    """Đếm số bài viết cần tạo ảnh (tối đa 5)."""
+    import re
+    # Tìm số trong task: "3 bài", "2 post", "viết 4"
+    m = re.search(r'(\d+)\s*(bài|post|blog|email|ad)', task.lower())
+    if m:
+        return min(int(m.group(1)), 5)
+    # Đếm số lần xuất hiện heading bài viết trong kết quả
+    headings = len(re.findall(r'(?:bài\s*\d+|##\s*bài|post\s*\d+)', final_text.lower()))
+    if headings > 0:
+        return min(headings, 5)
+    return 1  # mặc định 1 ảnh
 
 
 if __name__ == "__main__":
