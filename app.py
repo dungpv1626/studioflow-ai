@@ -467,34 +467,42 @@ with tab5:
         preview_placeholder = st.empty()
 
         if st.button("🖼️ Tạo hình ảnh", type="primary", use_container_width=True, key="btn_img"):
-            from skills.image_generation import generate_marketing_image, generate_preset_image
+            from skills.image_generation import generate_image_sync, IMAGE_PRESETS
 
-            output_path = None
-            if save_local:
-                import time
-                fname = f"output/img_{int(time.time())}.png"
-                Path("output").mkdir(exist_ok=True)
-                output_path = fname
-
-            with st.spinner("Đang tạo hình ảnh..."):
+            with st.spinner("Đang tạo hình ảnh... (30–90 giây)"):
                 if selected_preset != "(Không dùng preset)":
-                    result = run_async(generate_preset_image(selected_preset, output_path))
+                    p = IMAGE_PRESETS[selected_preset]
+                    result = generate_image_sync(p["prompt"], aspect_ratio=p.get("aspect_ratio", "1:1"))
                 elif custom_prompt.strip():
-                    result = run_async(generate_marketing_image(
-                        custom_prompt, width=width, height=height,
-                        model=model, output_path=output_path,
-                    ))
+                    ar = "1:1"
+                    if width > height:
+                        ar = "16:9"
+                    elif height > width:
+                        ar = "9:16"
+                    result = generate_image_sync(custom_prompt, aspect_ratio=ar)
                 else:
                     st.warning("Chọn preset hoặc nhập prompt")
                     result = None
 
             if result:
-                preview_placeholder.image(result["image_url"], use_container_width=True)
-                st.success("✅ Tạo ảnh thành công!")
-                st.markdown(f"**URL:** `{result['image_url']}`")
-                if result.get("local_path"):
-                    st.info(f"Đã lưu: `{result['local_path']}`")
-                st.code(result["image_url"], language=None)
+                img_bytes = result.get("img_bytes")
+                img_url = result.get("image_url", "")
+                if img_bytes:
+                    preview_placeholder.image(img_bytes, use_container_width=True)
+                    st.success(f"✅ Tạo ảnh thành công! ({result.get('source', '?')})")
+                    st.download_button(
+                        "⬇️ Tải ảnh (có logo Studio Flow)",
+                        data=img_bytes,
+                        file_name=f"studioflow_{selected_preset if selected_preset != '(Không dùng preset)' else 'custom'}.jpg",
+                        mime="image/jpeg",
+                        use_container_width=True,
+                    )
+                elif img_url:
+                    preview_placeholder.image(img_url, use_container_width=True)
+                    st.success("✅ Tạo ảnh thành công!")
+                    st.markdown(f"[⬇️ Tải ảnh]({img_url})")
+                else:
+                    st.error("❌ Không tạo được ảnh. Thử lại sau.")
 
         else:
             preview_placeholder.markdown(
