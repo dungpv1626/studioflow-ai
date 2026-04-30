@@ -250,29 +250,35 @@ Quy tắc:
     # Tạo ảnh tự động — luôn chạy (generate_image đã bị bỏ khỏi tools)
     preset = _pick_preset_for_task(task)
     n = _count_posts(task, final_text)
-    auto_caption = _make_auto_caption(task)
     aspect_ratio = IMAGE_PRESETS.get(preset, IMAGE_PRESETS["social_post"]).get("aspect_ratio", "1:1")
 
-    # Tạo n prompts khác nhau dựa trên nội dung thực tế (1 LLM call)
-    _log(f"\n[Image] Đang tạo {n} prompt ảnh dựa trên nội dung...")
-    image_prompts = _make_image_prompts(task, final_text, n)
-    for idx, ip in enumerate(image_prompts):
-        _log(f"[Image] Prompt {idx+1}: {ip[:80]}")
+    # Tạo n prompts + n captions từ nội dung thực tế (1 LLM call)
+    _log(f"\n[Image] Đang tạo {n} prompt + phụ đề từ nội dung...")
+    image_prompts, image_captions = _make_image_prompts_and_captions(task, final_text, n)
+    for idx, (ip, ic) in enumerate(zip(image_prompts, image_captions)):
+        _log(f"[Image] Prompt {idx+1}: {ip[:100]}")
+        _log(f"[Image] Caption {idx+1}: {ic[:60]}")
 
-    _log(f"[Image] Bắt đầu generate {n} ảnh (aspect={aspect_ratio})...")
+    _log(f"[Image] Bắt đầu generate {n} ảnh (aspect={aspect_ratio}, use_reference=False)...")
 
     for i in range(n):
         try:
             _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
-            result = generate_image_sync(image_prompts[i], aspect_ratio=aspect_ratio)
+            # use_reference=False — tắt img2img vì ảnh tham chiếu trong assets/ không phải template chuẩn
+            result = generate_image_sync(image_prompts[i], aspect_ratio=aspect_ratio, use_reference=False)
             _log(f"[Image] Source: {result.get('source', '?')}")
             local_path = result.get("local_path", "")
             image_url = result.get("image_url", "")
             img_bytes = result.get("img_bytes")
 
-            if auto_caption and img_bytes:
-                img_bytes = _apply_caption_to_bytes(img_bytes, auto_caption)
-                _log(f"[Image] Đã thêm phụ đề: {auto_caption[:60]}")
+            caption = image_captions[i] if i < len(image_captions) else ""
+            if caption and img_bytes:
+                img_bytes_with_cap = _apply_caption_to_bytes(img_bytes, caption)
+                if img_bytes_with_cap and len(img_bytes_with_cap) > 1000:
+                    img_bytes = img_bytes_with_cap
+                    _log(f"[Image] ✓ Phụ đề: {caption[:60]}")
+                else:
+                    _log(f"[Image] ✗ Caption thất bại, dùng ảnh không có phụ đề")
 
             _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0}")
             if img_bytes or local_path or image_url:
@@ -303,76 +309,93 @@ Quy tắc:
     return final_text, collected_images
 
 
-def _make_image_prompts(task: str, final_text: str, n: int) -> list[str]:
+def _make_image_prompts_and_captions(task: str, final_text: str, n: int) -> tuple[list[str], list[str]]:
     """
-    Dùng LLM tạo n image prompts tiếng Anh từ nội dung thực tế (1 LLM call).
-    Trả danh sách n prompts, mỗi prompt cho 1 hình ảnh khác nhau.
+    Dùng LLM tạo n image prompts (tiếng Anh) + n captions (tiếng Việt) trong 1 call.
+    Trả (prompts_list, captions_list) — mỗi prompt + caption khớp nhau theo index.
     """
-    content_snippet = final_text[:600] if final_text else task[:300]
-    # Fallback variations — đảm bảo mỗi ảnh khác nhau dù LLM thất bại
-    _fallback_scenes = [
-        "Vietnamese photographer reviewing studio schedule on laptop, professional office",
-        "Happy couple at professional photography studio, modern interior, natural lighting",
-        "Studio owner checking invoice app on phone, modern workspace, clean desk",
-        "Photography equipment on display in Vietnamese studio, camera lenses, professional setup",
-        "Team meeting at photo studio, discussing marketing plans, bright modern office",
+    content_snippet = final_text[:800] if final_text else task[:400]
+    _fallback_prompts = [
+        "Vietnamese photographer stressed looking at overflowing appointment book, messy desk, tired expression, warm office light",
+        "Happy couple smiling at professional photography studio reception, bright modern interior, welcoming atmosphere",
+        "Studio owner confidently reviewing business analytics on laptop, clean modern office, professional setting",
+        "Photography equipment neatly organized in Vietnamese studio, camera lenses on shelf, professional setup",
+        "Team of photographers collaborating at photo studio, reviewing images on large screen, creative workspace",
+    ]
+    _fallback_captions = [
+        "Studio Flow: Giải pháp quản lý studio số 1 Việt Nam",
+        "Studio Flow: Quản lý lịch hẹn thông minh, không bỏ lỡ khách hàng",
+        "Studio Flow: Hóa đơn chuyên nghiệp, báo cáo tự động",
+        "Studio Flow Pro: Nâng tầm studio của bạn — 299.000đ/tháng",
+        "Studio Flow: Dùng thử miễn phí tại studioflow.vn",
     ]
 
     try:
         resp = _client.messages.create(
             model=config.CLAUDE_DEFAULT_MODEL,
-            max_tokens=600,
+            max_tokens=800,
             messages=[{
                 "role": "user",
                 "content": (
-                    f"You are creating Midjourney-style image prompts for a Vietnamese photography studio management app called Studio Flow.\n\n"
-                    f"Content topic: {task[:300]}\n"
-                    f"Article excerpt: {content_snippet[:500]}\n\n"
-                    f"Create EXACTLY {n} image prompts that VISUALLY ILLUSTRATE the topic above.\n"
-                    f"Each prompt must:\n"
-                    f"- Be 30-50 English words\n"
-                    f"- Describe a specific, realistic scene directly related to the topic (not generic studio shots)\n"
-                    f"- Include: subject action, setting details, lighting, mood/emotion\n"
-                    f"- Feature Vietnamese people in realistic photography business scenarios\n"
-                    f"- Be completely DIFFERENT from each other (different scenes, angles, subjects)\n"
-                    f"- NOT include: text, logos, watermarks, UI mockups\n\n"
-                    f"Return EXACTLY {n} lines. One prompt per line. No numbers, bullets, or explanations."
+                    f"You are creating marketing content for Studio Flow, a Vietnamese photography studio management app.\n\n"
+                    f"Task topic: {task[:300]}\n"
+                    f"Article content: {content_snippet[:600]}\n\n"
+                    f"Create EXACTLY {n} pairs of (image prompt + Vietnamese caption) that DIRECTLY ILLUSTRATE this topic.\n\n"
+                    f"FORMAT — return EXACTLY {n*2} lines alternating:\n"
+                    f"Line 1: English image prompt (30-50 words, specific realistic scene, Vietnamese people, photography business, emotion + lighting + setting details, NO text/logo in image)\n"
+                    f"Line 2: Vietnamese caption (under 15 words, Studio Flow branding, benefit-focused)\n"
+                    f"Line 3: English image prompt (completely different scene from Line 1)\n"
+                    f"Line 4: Vietnamese caption\n"
+                    f"... and so on for {n} pairs.\n\n"
+                    f"Rules:\n"
+                    f"- Each image must show a DIFFERENT specific scene (not generic studio interior)\n"
+                    f"- Scenes must visually represent the topic's key message\n"
+                    f"- No numbers, bullets, labels, or explanations — just the lines"
                 ),
             }],
         )
-        # Parse text từ response (không giả định content[0] là text)
         text = ""
         for block in resp.content:
             if hasattr(block, "text") and block.text:
                 text = block.text.strip()
                 break
 
-        # Strip số thứ tự, bullet, dấu gạch đầu dòng
-        raw_lines = text.split("\n")
-        lines = []
-        for l in raw_lines:
-            l = l.strip()
-            if not l:
-                continue
-            # Bỏ prefix: "1. ", "- ", "• ", "* ", "1) " v.v.
-            import re as _re
-            l = _re.sub(r'^[\d]+[.)]\s*', '', l)
-            l = _re.sub(r'^[-•*]\s*', '', l).strip()
-            if len(l) > 10:
-                lines.append(l)
+        import re as _re
+        raw_lines = [
+            _re.sub(r'^[\d]+[.)]\s*', '', l.strip()).lstrip("-•* ").strip()
+            for l in text.split("\n")
+            if l.strip() and len(l.strip()) > 8
+        ]
 
-        # Bổ sung nếu LLM trả thiếu — dùng fallback UNIQUE (không lặp)
-        i = 0
-        while len(lines) < n:
-            lines.append(_fallback_scenes[i % len(_fallback_scenes)] + f", Studio Flow Vietnam")
-            i += 1
+        prompts, captions = [], []
+        for idx, line in enumerate(raw_lines):
+            if idx % 2 == 0:
+                prompts.append(line)
+            else:
+                captions.append(line)
 
-        return lines[:n]
+        # Bổ sung fallback nếu thiếu
+        while len(prompts) < n:
+            i = len(prompts)
+            prompts.append(_fallback_prompts[i % len(_fallback_prompts)])
+        while len(captions) < n:
+            i = len(captions)
+            captions.append(_fallback_captions[i % len(_fallback_captions)])
+
+        return prompts[:n], captions[:n]
 
     except Exception as e:
-        print(f"[Image prompts] LLM thất bại: {e}, dùng fallback prompts unique")
-        # Fallback: n prompts KHÁC NHAU (không phải cùng 1 chuỗi × n)
-        return [_fallback_scenes[i % len(_fallback_scenes)] + f", Studio Flow Vietnam" for i in range(n)]
+        print(f"[Image prompts+captions] LLM thất bại: {e}, dùng fallback")
+        return (
+            [_fallback_prompts[i % len(_fallback_prompts)] for i in range(n)],
+            [_fallback_captions[i % len(_fallback_captions)] for i in range(n)],
+        )
+
+
+# Giữ alias cũ để không break code nếu có chỗ khác gọi
+def _make_image_prompts(task: str, final_text: str, n: int) -> list[str]:
+    prompts, _ = _make_image_prompts_and_captions(task, final_text, n)
+    return prompts
 
 
 def _pick_preset_for_task(task: str) -> str:
@@ -385,20 +408,6 @@ def _pick_preset_for_task(task: str) -> str:
     return "social_post"       # 1:1 default
 
 
-def _make_auto_caption(task: str) -> str:
-    """Tạo phụ đề tự động từ task cho Phase 2 fallback."""
-    task_lower = task.lower()
-    if any(k in task_lower for k in ["hóa đơn", "invoice"]):
-        return "Studio Flow: Hóa đơn chuyên nghiệp, quản lý thu chi dễ dàng!"
-    if any(k in task_lower for k in ["lịch hẹn", "calendar", "lịch"]):
-        return "Studio Flow: Quản lý lịch hẹn thông minh — không bỏ lỡ khách hàng nào!"
-    if any(k in task_lower for k in ["kol", "tiktok", "reels"]):
-        return "Studio Flow: Nền tảng quản lý studio hàng đầu Việt Nam"
-    if any(k in task_lower for k in ["pro", "299", "gói"]):
-        return "Studio Flow Pro — Chỉ 299.000đ/tháng, nâng tầm studio của bạn!"
-    if any(k in task_lower for k in ["free", "miễn phí"]):
-        return "Studio Flow: Dùng miễn phí, nâng cấp khi cần — không ràng buộc!"
-    return "Studio Flow: Giải pháp quản lý studio chụp ảnh số 1 Việt Nam"
 
 
 def _count_posts(task: str, final_text: str) -> int:
