@@ -143,6 +143,23 @@ with st.sidebar:
         st.rerun()
 
 
+# ─── History ──────────────────────────────────────────────────────────────────
+if "history" not in st.session_state:
+    st.session_state["history"] = []
+
+def _save_history(agent: str, task: str, text: str, images: list = None):
+    """Lưu kết quả vào lịch sử phiên làm việc."""
+    import datetime
+    st.session_state["history"].append({
+        "id": len(st.session_state["history"]),
+        "timestamp": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "agent": agent,
+        "task": task,
+        "text": text,
+        "images": images or [],
+    })
+
+
 # ─── Helper: chạy agent an toàn ───────────────────────────────────────────────
 def run_agent_safe(agent_fn, task: str) -> str:
     if not os.getenv("GEMINI_API_KEY"):
@@ -167,7 +184,7 @@ def run_async(coro):
 
 
 # ─── Tabs chính ───────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🤖 Orchestrator",
     "✍️ Content Agent",
     "🎬 KOL Agent",
@@ -175,6 +192,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🖼️ Tạo hình ảnh",
     "🗂️ Brand Assets",
     "📅 Monthly Planner",
+    "📜 Lịch sử",
 ])
 
 
@@ -237,6 +255,8 @@ with tab1:
                 with st.expander("📋 Log chi tiết", expanded=(not orch_images)):
                     st.text("\n".join(log_lines_orch))
             log_box_orch.empty()
+
+            _save_history("🤖 Orchestrator", task_orch, orch_text, orch_images)
 
             st.markdown("---")
             st.markdown("#### Kết quả")
@@ -331,6 +351,8 @@ with tab2:
                         st.text("\n".join(log_lines))
                 log_box.empty()
 
+                _save_history("✍️ Content Agent", task_content, result_text, result_images)
+
                 st.markdown("---")
                 st.markdown("#### Kết quả")
                 st.markdown(result_text)
@@ -418,6 +440,7 @@ with tab3:
             with st.spinner("Đang tạo kịch bản..."):
                 from agents.kol_agent import run_kol_agent
                 result = run_agent_safe(run_kol_agent, task_kol)
+            _save_history("🎬 KOL Agent", task_kol, result)
             st.markdown("---")
             st.markdown("#### Kết quả")
             st.markdown(result)
@@ -465,6 +488,7 @@ with tab4:
             with st.spinner("Đang phân tích... (có thể mất 30-60 giây)"):
                 from agents.business_analyst_agent import run_business_analyst_agent
                 result = run_agent_safe(run_business_analyst_agent, task_ba)
+            _save_history("📊 Business Analyst", task_ba, result)
             st.markdown("---")
             st.markdown("#### Kết quả")
             st.markdown(result)
@@ -694,6 +718,8 @@ with tab7:
                 col_m1.metric("Kế hoạch đã tạo", f"{sections_found}/7")
                 col_m2.metric("Độ dài tài liệu", f"{len(plan_result):,} ký tự".replace(",", "."))
 
+                _save_history("📅 Monthly Planner", task_plan, plan_result)
+
                 st.markdown("#### 📋 Kết quả")
                 st.markdown(plan_result)
 
@@ -717,3 +743,89 @@ with tab7:
                     )
         else:
             st.warning("Vui lòng nhập yêu cầu kế hoạch")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 8: Lịch sử
+# ══════════════════════════════════════════════════════════════════════════════
+with tab8:
+    st.markdown("### 📜 Lịch sử — Xem lại nội dung đã tạo")
+    st.caption("Lưu tự động trong phiên làm việc. Xuất Markdown để lưu lâu dài.")
+
+    history = st.session_state.get("history", [])
+
+    if not history:
+        st.info("Chưa có lịch sử. Hãy tạo nội dung ở các tab khác — kết quả sẽ tự động lưu vào đây.")
+    else:
+        col_h1, col_h2, col_h3 = st.columns(3)
+        col_h1.metric("Tổng mục", len(history))
+        col_h2.metric("Có ảnh", sum(1 for h in history if h["images"]))
+        col_h3.metric("Phiên bắt đầu", history[0]["timestamp"])
+
+        # Export toàn bộ lịch sử
+        import datetime as _dt
+        all_md = "\n\n---\n\n".join(
+            f"## [{h['timestamp']}] {h['agent']}\n**Yêu cầu:** {h['task']}\n\n{h['text']}"
+            for h in reversed(history)
+        )
+        st.download_button(
+            "💾 Xuất toàn bộ lịch sử (.md)",
+            data=all_md.encode("utf-8"),
+            file_name=f"studioflow_history_{_dt.datetime.now().strftime('%Y%m%d_%H%M')}.md",
+            mime="text/markdown",
+            use_container_width=False,
+        )
+
+        if st.button("🗑️ Xoá toàn bộ lịch sử", key="clear_history"):
+            st.session_state["history"] = []
+            st.rerun()
+
+        st.markdown("---")
+
+        # Hiển thị từng mục (mới nhất trước)
+        for entry in reversed(history):
+            img_label = f" · {len(entry['images'])} ảnh" if entry["images"] else ""
+            header = f"**{entry['timestamp']}** · {entry['agent']}{img_label}"
+            task_preview = entry["task"][:80] + ("..." if len(entry["task"]) > 80 else "")
+
+            with st.expander(f"{header} — _{task_preview}_", expanded=False):
+                st.markdown(f"**Yêu cầu:** {entry['task']}")
+                st.markdown("---")
+                st.markdown(entry["text"])
+
+                if entry["images"]:
+                    st.markdown(f"#### 🖼️ {len(entry['images'])} hình ảnh")
+                    img_cols = st.columns(min(len(entry["images"]), 3))
+                    for i, item in enumerate(entry["images"]):
+                        preset    = item[0] if len(item) > 0 else "custom"
+                        local_path = item[1] if len(item) > 1 else ""
+                        img_bytes  = item[3] if len(item) > 3 else None
+
+                        if not img_bytes and local_path:
+                            try:
+                                img_bytes = Path(local_path).read_bytes()
+                            except Exception:
+                                pass
+
+                        with img_cols[i % 3]:
+                            if img_bytes:
+                                st.image(img_bytes, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
+                                st.download_button(
+                                    f"⬇️ Tải ảnh {i+1}",
+                                    data=img_bytes,
+                                    file_name=f"history_{entry['id']}_{i+1}.jpg",
+                                    mime="image/jpeg",
+                                    key=f"hist_dl_{entry['id']}_{i}",
+                                    use_container_width=True,
+                                )
+                            else:
+                                st.caption(f"Ảnh {i+1} không còn trong bộ nhớ")
+
+                st.download_button(
+                    "💾 Tải nội dung này (.md)",
+                    data=f"# {entry['agent']}\n**Thời gian:** {entry['timestamp']}\n**Yêu cầu:** {entry['task']}\n\n{entry['text']}".encode("utf-8"),
+                    file_name=f"studioflow_{entry['id']}_{entry['timestamp'].replace('/', '-').replace(' ', '_').replace(':', '')}.md",
+                    mime="text/markdown",
+                    key=f"hist_export_{entry['id']}",
+                    use_container_width=False,
+                )
