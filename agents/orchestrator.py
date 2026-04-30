@@ -72,7 +72,7 @@ def run_orchestrator(request: str, on_progress=None) -> tuple[str, list]:
 
 Bạn là ORCHESTRATOR — AI Marketing Director của Studio Flow.
 Bạn điều phối team AI gồm 3 agent chuyên biệt:
-1. Content Agent — Tạo nội dung marketing (bài viết, blog, ads, calendar, hình ảnh)
+1. Content Agent — Tạo nội dung marketing (bài viết, blog, ads, calendar)
 2. KOL/KOC Agent — Kịch bản, brief, chiến lược KOL/KOC
 3. Business Analyst Agent — Nghiên cứu thị trường, phân tích, chiến lược
 
@@ -80,6 +80,12 @@ Khi nhận request:
 1. Phân tích xem cần agent nào (có thể nhiều agent)
 2. Phân chia task rõ ràng cho từng agent
 3. Tổng hợp kết quả cuối cùng thành báo cáo cohesive
+
+QUAN TRỌNG VỀ HÌNH ẢNH:
+- Hệ thống kỹ thuật TỰ ĐỘNG tạo hình ảnh thực (JPEG có logo Studio Flow) sau khi Content Agent hoàn thành.
+- Hình ảnh được hiển thị RIÊNG bên dưới văn bản trong giao diện — bạn KHÔNG thấy chúng trong tool result.
+- TUYỆT ĐỐI KHÔNG nói "không thể tạo hình ảnh", "chỉ tạo mô tả", hay xin lỗi về hình ảnh.
+- Trong tổng kết cuối, chỉ cần nói "Hình ảnh đã được tạo tự động kèm logo Studio Flow."
 
 Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho..."
 """,
@@ -155,6 +161,17 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
     for block in response.content:
         if hasattr(block, "text") and block.text:
             final_text += block.text
+
+    # Nếu đã có ảnh thực, xoá các đoạn Gemini viết sai về việc không thể tạo ảnh
+    if collected_images:
+        import re as _re
+        false_patterns = [
+            r'[^\n]*(?:không thể trực tiếp tạo|không thể tạo ra hình ảnh|chỉ giới hạn ở việc tạo.*mô tả|xin lỗi.*hình ảnh|bạn có thể sử dụng.*mô tả này để yêu cầu.*thiết kế)[^\n]*\n?',
+        ]
+        for pat in false_patterns:
+            final_text = _re.sub(pat, '', final_text, flags=_re.IGNORECASE)
+        final_text = final_text.strip()
+
     return final_text, collected_images
 
 
