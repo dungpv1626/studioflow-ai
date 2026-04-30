@@ -243,6 +243,7 @@ def generate_image_sync(prompt: str, aspect_ratio: str = "1:1", use_reference: b
         f"{prompt}, Studio Flow brand style: dark navy blue background, "
         "professional clean design, Vietnamese photography studio, high quality, no text, no watermark"
     )
+    print(f"[generate_image_sync] prompt → {branded_prompt[:120]}")
     raw_bytes = None
     image_url = ""
     source = "none"
