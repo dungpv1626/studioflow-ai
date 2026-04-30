@@ -207,16 +207,36 @@ with tab1:
     )
 
     if st.button("🚀 Chạy Orchestrator", type="primary", use_container_width=True, key="btn_orch"):
-        if task_orch.strip():
-            with st.spinner("Đang xử lý... (có thể mất 3-5 phút nếu tạo ảnh)"):
-                from agents.orchestrator import run_orchestrator
-                orch_out = run_agent_safe(run_orchestrator, task_orch)
+        if not task_orch.strip():
+            st.warning("Vui lòng nhập yêu cầu")
+        elif not os.getenv("GEMINI_API_KEY"):
+            st.error("❌ Chưa có GEMINI_API_KEY.")
+        else:
+            from agents.orchestrator import run_orchestrator
+            log_box_orch = st.empty()
+            log_lines_orch = []
 
-            # run_orchestrator trả (text, images); run_agent_safe có thể trả str nếu exception
+            def on_progress_orch(msg):
+                log_lines_orch.append(str(msg))
+                log_box_orch.text("\n".join(log_lines_orch[-25:]))
+
+            with st.spinner("Đang xử lý... (3-7 phút nếu tạo ảnh)"):
+                try:
+                    orch_out = run_orchestrator(task_orch, on_progress=on_progress_orch)
+                except Exception as _e:
+                    import traceback
+                    orch_out = (f"❌ Lỗi: {_e}\n\n```\n{traceback.format_exc()}\n```", [])
+
+            # run_orchestrator trả (text, images)
             if isinstance(orch_out, tuple):
                 orch_text, orch_images = orch_out
             else:
                 orch_text, orch_images = str(orch_out), []
+
+            if log_lines_orch:
+                with st.expander("📋 Log chi tiết", expanded=(not orch_images)):
+                    st.text("\n".join(log_lines_orch))
+            log_box_orch.empty()
 
             st.markdown("---")
             st.markdown("#### Kết quả")
@@ -254,8 +274,6 @@ with tab1:
                             st.image(image_url, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
                         else:
                             st.warning(f"Không tải được ảnh {i+1}")
-        else:
-            st.warning("Vui lòng nhập yêu cầu")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

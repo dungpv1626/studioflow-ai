@@ -230,10 +230,18 @@ Quy tắc:
         if hasattr(block, "text") and block.text:
             final_text += block.text
 
-    # Xoá mô tả hình ảnh mà Gemini có thể viết trong text (không cần nữa vì hình ảnh tạo tự động)
+    # Xoá mô tả hình ảnh mà Gemini có thể viết trong text (không cần vì hình ảnh tạo tự động)
     import re
+    # Pattern 1: "Hình ảnh 1:", "Hình ảnh 2:" (numbered — Gemini hay dùng nhất)
     final_text = re.sub(
-        r'\n?\*?\*?(?:Mô tả hình ảnh|Hình ảnh minh họa|Hình ảnh đề xuất|Image suggestion|Ảnh minh họa|Image:|Ảnh:)[^\n]*(?:\n(?!\n)[^\n]*)*',
+        r'\n?\*?\*?Hình\s+ảnh\s+\d+\s*[:\-][^\n]*(?:\n(?!\n)[^\n]*)*',
+        '',
+        final_text,
+        flags=re.IGNORECASE,
+    )
+    # Pattern 2: Các label khác Gemini có thể dùng
+    final_text = re.sub(
+        r'\n?\*?\*?(?:Mô tả hình ảnh|Hình ảnh minh họa|Hình ảnh đề xuất|Hình ảnh kèm theo|Image suggestion|Ảnh minh họa|Image:|Ảnh:|🖼️\s*Hình ảnh)[^\n]*(?:\n(?!\n)[^\n]*)*',
         '',
         final_text,
         flags=re.IGNORECASE,

@@ -50,14 +50,20 @@ ORCHESTRATOR_TOOLS = [
 ]
 
 
-def run_orchestrator(request: str) -> tuple[str, list]:
+def run_orchestrator(request: str, on_progress=None) -> tuple[str, list]:
     """
     Entry point chính — nhận bất kỳ request nào và tự phân công agent phù hợp.
     Returns: (final_text, collected_images) — images từ content_agent được gom lại.
+    on_progress(msg): callback realtime cho Streamlit UI.
     """
     messages = [{"role": "user", "content": request}]
     initial_message = messages[0]
     collected_images = []  # gom ảnh từ content_agent
+
+    def _log(msg):
+        print(msg)
+        if on_progress:
+            on_progress(msg)
 
     system = [
         {
@@ -81,9 +87,8 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
         }
     ]
 
-    print(f"\n{'='*60}")
-    print(f"[ORCHESTRATOR] Nhận request: {request}")
-    print(f"{'='*60}\n")
+    _log(f"\n[Orchestrator] Nhận request: {request[:100]}")
+
 
     MAX_ITERATIONS = 10
     iteration = 0
@@ -101,8 +106,8 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
         )
 
         for block in response.content:
-            if hasattr(block, "text"):
-                print(f"[Director]: {block.text}")
+            if hasattr(block, "text") and block.text:
+                _log(f"[Director]: {block.text[:200]}")
 
         if response.stop_reason == "end_turn":
             break
@@ -111,17 +116,16 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    print(f"\n{'─'*40}")
-                    print(f"[Delegating to] → {block.name.replace('run_', '').upper()}")
-                    print(f"[Task]: {block.input.get('task', '')[:150]}")
-                    print(f"{'─'*40}")
+                    agent_label = block.name.replace("run_", "").replace("_", " ").title()
+                    _log(f"\n→ Đang giao task cho {agent_label}...")
 
                     if block.name == "run_content_agent":
-                        agent_out = run_content_agent(block.input["task"])
+                        agent_out = run_content_agent(block.input["task"], on_progress=on_progress)
                         if isinstance(agent_out, tuple):
                             result_text_part, imgs = agent_out
                             collected_images.extend(imgs)
                             result = result_text_part
+                            _log(f"✓ Content Agent xong — {len(imgs)} ảnh")
                         else:
                             result = agent_out
                     elif block.name == "run_kol_agent":
