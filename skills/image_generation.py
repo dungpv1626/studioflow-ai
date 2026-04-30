@@ -239,11 +239,9 @@ def generate_image_sync(prompt: str, aspect_ratio: str = "1:1", use_reference: b
     import time as _time
     import urllib.parse
 
-    branded_prompt = (
-        f"{prompt}, Studio Flow brand style: dark navy blue background, "
-        "professional clean design, Vietnamese photography studio, high quality, no text, no watermark"
-    )
-    print(f"[generate_image_sync] prompt → {branded_prompt[:120]}")
+    # Chỉ thêm quality modifiers — KHÔNG override style để prompt chính được ưu tiên
+    branded_prompt = f"{prompt}, high quality photo, no text, no watermark, no logo"
+    print(f"[generate_image_sync] prompt → {branded_prompt[:150]}")
     raw_bytes = None
     image_url = ""
     source = "none"

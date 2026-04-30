@@ -321,20 +321,22 @@ def _make_image_prompts(task: str, final_text: str, n: int) -> list[str]:
     try:
         resp = _client.messages.create(
             model=config.CLAUDE_DEFAULT_MODEL,
-            max_tokens=500,
+            max_tokens=600,
             messages=[{
                 "role": "user",
                 "content": (
-                    f"Create EXACTLY {n} different image prompts for Studio Flow marketing.\n"
-                    f"Topic: {task[:200]}\n"
-                    f"Content summary: {content_snippet[:400]}\n\n"
-                    f"Rules for each prompt:\n"
-                    f"- Under 25 English words\n"
-                    f"- Real scenes, Vietnamese people, professional photography studio context\n"
-                    f"- Directly related to the topic\n"
-                    f"- EACH prompt must be UNIQUELY different from the others\n"
-                    f"- NO text, logo, watermark in the image\n\n"
-                    f"Return EXACTLY {n} lines. One prompt per line. No numbers. No bullet points. No explanation."
+                    f"You are creating Midjourney-style image prompts for a Vietnamese photography studio management app called Studio Flow.\n\n"
+                    f"Content topic: {task[:300]}\n"
+                    f"Article excerpt: {content_snippet[:500]}\n\n"
+                    f"Create EXACTLY {n} image prompts that VISUALLY ILLUSTRATE the topic above.\n"
+                    f"Each prompt must:\n"
+                    f"- Be 30-50 English words\n"
+                    f"- Describe a specific, realistic scene directly related to the topic (not generic studio shots)\n"
+                    f"- Include: subject action, setting details, lighting, mood/emotion\n"
+                    f"- Feature Vietnamese people in realistic photography business scenarios\n"
+                    f"- Be completely DIFFERENT from each other (different scenes, angles, subjects)\n"
+                    f"- NOT include: text, logos, watermarks, UI mockups\n\n"
+                    f"Return EXACTLY {n} lines. One prompt per line. No numbers, bullets, or explanations."
                 ),
             }],
         )
