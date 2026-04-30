@@ -468,28 +468,36 @@ with tab5:
 
         if st.button("🖼️ Tạo hình ảnh", type="primary", use_container_width=True, key="btn_img"):
             from skills.image_generation import generate_image_sync, IMAGE_PRESETS
+            import traceback as _tb
 
+            img_log = []
+            result = None
+            err_detail = ""
             with st.spinner("Đang tạo hình ảnh... (30–90 giây)"):
-                if selected_preset != "(Không dùng preset)":
-                    p = IMAGE_PRESETS[selected_preset]
-                    result = generate_image_sync(p["prompt"], aspect_ratio=p.get("aspect_ratio", "1:1"))
-                elif custom_prompt.strip():
-                    ar = "1:1"
-                    if width > height:
-                        ar = "16:9"
-                    elif height > width:
-                        ar = "9:16"
-                    result = generate_image_sync(custom_prompt, aspect_ratio=ar)
-                else:
-                    st.warning("Chọn preset hoặc nhập prompt")
-                    result = None
+                try:
+                    if selected_preset != "(Không dùng preset)":
+                        p = IMAGE_PRESETS[selected_preset]
+                        result = generate_image_sync(p["prompt"], aspect_ratio=p.get("aspect_ratio", "1:1"))
+                    elif custom_prompt.strip():
+                        ar = "1:1"
+                        if width > height:
+                            ar = "16:9"
+                        elif height > width:
+                            ar = "9:16"
+                        result = generate_image_sync(custom_prompt, aspect_ratio=ar)
+                    else:
+                        st.warning("Chọn preset hoặc nhập prompt")
+                except Exception as _e:
+                    err_detail = _tb.format_exc()
+                    st.error(f"❌ Lỗi khi tạo ảnh: {_e}")
 
             if result:
                 img_bytes = result.get("img_bytes")
                 img_url = result.get("image_url", "")
+                src = result.get("source", "?")
                 if img_bytes:
                     preview_placeholder.image(img_bytes, use_container_width=True)
-                    st.success(f"✅ Tạo ảnh thành công! ({result.get('source', '?')})")
+                    st.success(f"✅ Tạo ảnh thành công! Nguồn: **{src}** · {len(img_bytes)//1024}KB")
                     st.download_button(
                         "⬇️ Tải ảnh (có logo Studio Flow)",
                         data=img_bytes,
@@ -502,7 +510,10 @@ with tab5:
                     st.success("✅ Tạo ảnh thành công!")
                     st.markdown(f"[⬇️ Tải ảnh]({img_url})")
                 else:
-                    st.error("❌ Không tạo được ảnh. Thử lại sau.")
+                    st.error(f"❌ Không tạo được ảnh. Source={src}. Kiểm tra API keys trong secrets.")
+            elif err_detail:
+                with st.expander("🔍 Chi tiết lỗi"):
+                    st.code(err_detail)
 
         else:
             preview_placeholder.markdown(
