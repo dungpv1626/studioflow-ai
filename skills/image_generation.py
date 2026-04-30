@@ -200,19 +200,55 @@ def _overlay_logo_in_memory(raw_bytes: bytes) -> bytes:
         return raw_bytes
 
 
-def generate_image_sync(prompt: str, aspect_ratio: str = "1:1") -> dict:
+def _pick_reference_image() -> str | None:
+    """
+    Tìm ảnh tham khảo từ assets/infographics hoặc assets/templates.
+    Trả về base64 data URI, hoặc None nếu không có.
+    """
+    import base64 as _b64
+    _ref_dirs = [
+        Path(__file__).parent.parent / "assets" / "infographics",
+        Path(__file__).parent.parent / "assets" / "templates",
+    ]
+    _candidates = []
+    for _d in _ref_dirs:
+        if _d.exists():
+            _candidates.extend(p for p in _d.glob("*.jpg") if p.stat().st_size > 20_000)
+            _candidates.extend(p for p in _d.glob("*.png") if p.stat().st_size > 20_000)
+    if not _candidates:
+        return None
+    # Chọn ảnh lớn nhất (thường là chất lượng cao nhất)
+    _best = max(_candidates, key=lambda p: p.stat().st_size)
+    try:
+        _data = _b64.b64encode(_best.read_bytes()).decode()
+        _mime = "image/png" if _best.suffix.lower() == ".png" else "image/jpeg"
+        print(f"[Ref image] Dùng: {_best.name} ({_best.stat().st_size//1024}KB)")
+        return f"data:{_mime};base64,{_data}"
+    except Exception as _e:
+        print(f"[Ref image] Lỗi đọc: {_e}")
+        return None
+
+
+def generate_image_sync(prompt: str, aspect_ratio: str = "1:1", use_reference: bool = True) -> dict:
     """
     Phiên bản ĐỒNG BỘ (sync) của generate_marketing_image.
     Dùng httpx.Client thay vì AsyncClient — tránh mọi vấn đề asyncio/thread trên Streamlit Cloud.
-    Ưu tiên Kie AI → Pollinations fallback. Trả về dict với img_bytes đã overlay logo.
+    Ưu tiên Kie AI (với ảnh tham khảo nếu có) → Pollinations fallback.
+    Trả về dict với img_bytes đã overlay logo.
     """
     import time as _time
     import urllib.parse
 
-    branded_prompt = f"{prompt}, professional photography studio, Vietnam, high quality, no text, no logo"
+    branded_prompt = (
+        f"{prompt}, Studio Flow brand style: dark navy blue background, "
+        "professional clean design, Vietnamese photography studio, high quality, no text, no watermark"
+    )
     raw_bytes = None
     image_url = ""
     source = "none"
+
+    # Tải ảnh tham khảo (nếu có)
+    ref_image_uri = _pick_reference_image() if use_reference else None
 
     # ── Thử Kie AI (sync) ─────────────────────────────────────────────────────
     kie_api_key = os.getenv("KIE_AI_API_KEY", "")
@@ -223,13 +259,17 @@ def generate_image_sync(prompt: str, aspect_ratio: str = "1:1") -> dict:
                 "Content-Type": "application/json",
             }
             size_map = {"1:1": "1:1", "16:9": "16:9", "9:16": "9:16", "4:3": "4:3", "3:4": "3:4"}
+            kie_input = {
+                "prompt": branded_prompt,
+                "aspect_ratio": size_map.get(aspect_ratio, "1:1"),
+                "resolution": "1K",
+            }
+            if ref_image_uri:
+                kie_input["image_url"] = ref_image_uri
+                kie_input["strength"] = 0.65
             payload = {
                 "model": "nano-banana-2",
-                "input": {
-                    "prompt": branded_prompt,
-                    "aspect_ratio": size_map.get(aspect_ratio, "1:1"),
-                    "resolution": "1K",
-                },
+                "input": kie_input,
             }
             with httpx.Client(timeout=30.0) as client:
                 r = client.post(f"{KIE_BASE}/api/v1/jobs/createTask", headers=headers_kie, json=payload)
