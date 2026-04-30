@@ -263,32 +263,47 @@ Quy tắc:
 
     for i in range(n):
         try:
-            _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
-            # use_reference=False — tắt img2img vì ảnh tham chiếu trong assets/ không phải template chuẩn
-            result = generate_image_sync(image_prompts[i], aspect_ratio=aspect_ratio, use_reference=False)
-            _log(f"[Image] Source: {result.get('source', '?')}")
-            local_path = result.get("local_path", "")
-            image_url = result.get("image_url", "")
-            img_bytes = result.get("img_bytes")
+            caption = image_captions[i] if i < len(image_captions) else "Studio Flow: Giải pháp quản lý studio số 1 Việt Nam"
 
-            caption = image_captions[i] if i < len(image_captions) else ""
-            if caption and img_bytes:
-                img_bytes_with_cap = _apply_caption_to_bytes(img_bytes, caption)
-                if img_bytes_with_cap and len(img_bytes_with_cap) > 1000:
-                    img_bytes = img_bytes_with_cap
-                    _log(f"[Image] ✓ Phụ đề: {caption[:60]}")
+            if preset == "infographic":
+                # Render infographic bằng Pillow thay vì gọi Kie AI
+                _log(f"[Infographic] Đang render infographic {i+1}/{n}...")
+                img_bytes = _render_infographic(task, final_text, caption, index=i)
+                if img_bytes:
+                    collected_images.append((preset, "", "", img_bytes))
+                    _log(f"[Infographic] ✓ Infographic {i+1}/{n} hoàn thành ({len(img_bytes)//1024}KB)")
                 else:
-                    _log(f"[Image] ✗ Caption thất bại, dùng ảnh không có phụ đề")
-
-            _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0}")
-            if img_bytes or local_path or image_url:
-                collected_images.append((preset, local_path, image_url, img_bytes))
-                _log(f"[Image] ✓ Ảnh {i+1}/{n} hoàn thành")
+                    _log(f"[Infographic] ✗ Render thất bại, fallback sang ảnh thường")
+                    # Fallback: generate ảnh thường với Kie AI
+                    result = generate_image_sync(image_prompts[i], aspect_ratio="1:1", use_reference=False)
+                    img_bytes = result.get("img_bytes")
+                    if img_bytes:
+                        collected_images.append((preset, result.get("local_path",""), result.get("image_url",""), img_bytes))
             else:
-                _log(f"[Image] ✗ Ảnh {i+1}: result rỗng")
+                _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
+                result = generate_image_sync(image_prompts[i], aspect_ratio=aspect_ratio, use_reference=False)
+                _log(f"[Image] Source: {result.get('source', '?')}")
+                local_path = result.get("local_path", "")
+                image_url = result.get("image_url", "")
+                img_bytes = result.get("img_bytes")
+
+                if caption and img_bytes:
+                    img_bytes_with_cap = _apply_caption_to_bytes(img_bytes, caption)
+                    if img_bytes_with_cap and len(img_bytes_with_cap) > 1000:
+                        img_bytes = img_bytes_with_cap
+                        _log(f"[Image] ✓ Phụ đề: {caption[:60]}")
+                    else:
+                        _log(f"[Image] ✗ Caption thất bại, dùng ảnh không có phụ đề")
+
+                _log(f"[Image] bytes={len(img_bytes) if img_bytes else 0}")
+                if img_bytes or local_path or image_url:
+                    collected_images.append((preset, local_path, image_url, img_bytes))
+                    _log(f"[Image] ✓ Ảnh {i+1}/{n} hoàn thành")
+                else:
+                    _log(f"[Image] ✗ Ảnh {i+1}: result rỗng")
         except Exception as e:
             import traceback
-            _log(f"[Image] ✗ Lỗi ảnh {i+1}: {e}")
+            _log(f"[Image] ✗ Lỗi {i+1}: {e}")
             _log(traceback.format_exc()[:300])
 
     # Fallback: nếu Kie AI hoàn toàn thất bại → dùng logo brand asset
@@ -399,8 +414,10 @@ def _make_image_prompts(task: str, final_text: str, n: int) -> list[str]:
 
 
 def _pick_preset_for_task(task: str) -> str:
-    """Chọn aspect ratio phù hợp dựa trên từ khoá trong task."""
+    """Chọn loại output phù hợp dựa trên từ khoá trong task."""
     task_lower = task.lower()
+    if any(k in task_lower for k in ["infographic", "infographics", "thống kê", "so sánh", "checklist", "danh sách"]):
+        return "infographic"   # Pillow-rendered
     if any(k in task_lower for k in ["banner", "website", "landing", "trang chủ", "hero"]):
         return "hero_banner"   # 16:9
     if any(k in task_lower for k in ["kol", "tiktok", "reels", "story", "dọc"]):
@@ -423,6 +440,196 @@ def _count_posts(task: str, final_text: str) -> int:
     if m:
         return min(int(m.group(1)), 3)
     return 1  # mặc định 1 ảnh
+
+
+def _render_infographic(task: str, final_text: str, caption: str, index: int = 0) -> bytes | None:
+    """
+    Tạo infographic bằng Pillow — render text + layout trực tiếp.
+    Trả JPEG bytes hoặc None nếu thất bại.
+    """
+    try:
+        from PIL import Image, ImageDraw
+        import io
+        import re
+        from pathlib import Path as _Path
+        from skills.brand_assets import _get_font
+
+        W, H = 1080, 1080
+        PAD = 56
+
+        # Studio Flow brand colors
+        BG      = (15, 32, 68)      # Navy
+        ACCENT  = (0, 212, 255)     # Cyan
+        CARD    = (22, 46, 95)      # Lighter navy
+        WHITE   = (255, 255, 255)
+        GRAY    = (180, 200, 230)
+        CAP_BG  = (0, 180, 220)
+
+        img = Image.new("RGB", (W, H), BG)
+        draw = ImageDraw.Draw(img)
+
+        # Top accent stripe
+        draw.rectangle([(0, 0), (W, 7)], fill=ACCENT)
+
+        # Fonts
+        f_title  = _get_font(42, bold=True)
+        f_point  = _get_font(28, bold=False)
+        f_num    = _get_font(28, bold=True)
+        f_cap    = _get_font(26, bold=False)
+        f_sub    = _get_font(22, bold=False)
+
+        # --- Parse content ---
+        # Extract title: first H1/H2 heading từ final_text
+        title = ""
+        points = []
+        lines_all = final_text.split("\n") if final_text else []
+
+        # Nếu nhiều infographic (index > 0), thử tìm section thứ (index+1)
+        section_starts = [i for i, l in enumerate(lines_all) if re.match(r'^#{1,3}\s+', l)]
+        start_line = section_starts[index] if index < len(section_starts) else (section_starts[0] if section_starts else 0)
+        end_line   = section_starts[index + 1] if (index + 1) < len(section_starts) else len(lines_all)
+        section_lines = lines_all[start_line:end_line]
+
+        for l in section_lines:
+            m = re.match(r'^#{1,3}\s+(.+)', l)
+            if m and not title:
+                title = m.group(1).strip()
+                continue
+            m2 = re.match(r'^[-•*]\s+(.+)', l)
+            if m2:
+                points.append(m2.group(1).strip())
+                continue
+            m3 = re.match(r'^\d+[.)]\s+(.+)', l)
+            if m3:
+                points.append(m3.group(1).strip())
+
+        # Fallback nếu parse thất bại
+        if not title:
+            title = task[:70]
+        if not points:
+            # Tách câu từ final_text làm points
+            sents = re.split(r'[.!?]\s+', final_text.replace('\n', ' '))
+            points = [s.strip() for s in sents if len(s.strip()) > 20][:6]
+        if not points:
+            points = ["Studio Flow giúp quản lý lịch hẹn thông minh",
+                      "Hóa đơn tự động, báo cáo tức thì",
+                      "Quản lý khách hàng tập trung, không bỏ sót lead"]
+
+        max_points = min(len(points), 6)
+
+        # --- Vẽ header card ---
+        header_h = 140
+        draw.rounded_rectangle([(PAD - 10, 30), (W - PAD + 10, 30 + header_h)], radius=14, fill=CARD)
+        draw.rectangle([(PAD - 10, 30), (PAD + 4, 30 + header_h)], fill=ACCENT)  # left border
+
+        # Title (word wrap)
+        title_lines = _wrap_text_pil(draw, title, f_title, W - PAD * 2 - 20)
+        ty = 50
+        for tl in title_lines[:3]:
+            draw.text((PAD + 10, ty), tl, font=f_title, fill=WHITE)
+            ty += 50
+
+        # Subtitle
+        draw.text((PAD + 10, ty + 4), f"Studio Flow · studioflow.vn", font=f_sub, fill=ACCENT)
+
+        # --- Vẽ các điểm ---
+        y = 30 + header_h + 28
+        item_h = int((H - y - 130) / max(max_points, 1))
+        item_h = min(item_h, 140)
+
+        for i, point in enumerate(points[:max_points]):
+            # Card nền
+            draw.rounded_rectangle([(PAD - 10, y), (W - PAD + 10, y + item_h - 10)], radius=10, fill=CARD)
+
+            # Số thứ tự (hình tròn)
+            cx, cy_c = PAD + 20, y + item_h // 2 - 5
+            r = 22
+            draw.ellipse([(cx - r, cy_c - r), (cx + r, cy_c + r)], fill=ACCENT)
+            num_str = str(i + 1)
+            try:
+                nb = draw.textbbox((0, 0), num_str, font=f_num)
+                nw, nh = nb[2] - nb[0], nb[3] - nb[1]
+            except Exception:
+                nw, nh = 18, 28
+            draw.text((cx - nw // 2, cy_c - nh // 2 - 1), num_str, font=f_num, fill=BG)
+
+            # Point text (wrap)
+            text_x = PAD + 54
+            pt_lines = _wrap_text_pil(draw, point, f_point, W - text_x - PAD - 10)
+            pt_y = y + (item_h - len(pt_lines[:2]) * 34) // 2 - 5
+            for pl in pt_lines[:2]:
+                draw.text((text_x, pt_y), pl, font=f_point, fill=WHITE)
+                pt_y += 34
+
+            y += item_h
+
+        # --- Logo overlay ---
+        _logo_dir = _Path(__file__).parent.parent / "assets" / "logo"
+        _candidates = [
+            _logo_dir / "Studioflow-logo - BG- removed.png",
+            _logo_dir / "Studioflow -Logo.png",
+        ]
+        logo_path = next((p for p in _candidates if p.exists()), None)
+        if logo_path:
+            logo = Image.open(str(logo_path)).convert("RGBA")
+            logo_w = 160
+            logo_h = int(logo.height * logo_w / logo.width)
+            logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
+            lx = W - logo_w - PAD + 10
+            ly = H - logo_h - 68
+            backing = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            bd = ImageDraw.Draw(backing)
+            try:
+                bd.rounded_rectangle([lx - 10, ly - 6, lx + logo_w + 10, ly + logo_h + 6], radius=8, fill=(15, 32, 68, 230))
+            except AttributeError:
+                bd.rectangle([lx - 10, ly - 6, lx + logo_w + 10, ly + logo_h + 6], fill=(15, 32, 68, 230))
+            img_rgba = img.convert("RGBA")
+            img_rgba = Image.alpha_composite(img_rgba, backing)
+            img_rgba.paste(logo, (lx, ly), mask=logo)
+            img = img_rgba.convert("RGB")
+            draw = ImageDraw.Draw(img)
+
+        # --- Caption bar ---
+        cap_h = 60
+        draw.rectangle([(0, H - cap_h), (W, H)], fill=CAP_BG)
+        try:
+            cb = draw.textbbox((0, 0), caption, font=f_cap)
+            cw = cb[2] - cb[0]
+        except Exception:
+            cw = len(caption) * 14
+        draw.text(((W - cw) // 2, H - cap_h + (cap_h - 28) // 2), caption, font=f_cap, fill=BG)
+
+        out = io.BytesIO()
+        img.convert("RGB").save(out, format="JPEG", quality=95)
+        print(f"[Infographic] Render OK: {out.tell()} bytes")
+        return out.getvalue()
+
+    except Exception as e:
+        import traceback
+        print(f"[Infographic] Render thất bại: {e}")
+        print(traceback.format_exc())
+        return None
+
+
+def _wrap_text_pil(draw, text: str, font, max_width: int) -> list[str]:
+    """Ngắt dòng text theo max_width pixel."""
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        test = (current + " " + word).strip()
+        try:
+            w = draw.textbbox((0, 0), test, font=font)[2]
+        except Exception:
+            w = len(test) * 16
+        if w <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [text]
 
 
 if __name__ == "__main__":
