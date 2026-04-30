@@ -330,16 +330,17 @@ def _make_auto_caption(task: str) -> str:
 
 
 def _count_posts(task: str, final_text: str) -> int:
-    """Đếm số bài viết cần tạo ảnh (tối đa 5)."""
+    """Đếm số ảnh cần tạo (tối đa 3 để tránh timeout)."""
     import re
-    # Tìm số trong task: "3 bài", "2 post", "viết 4"
-    m = re.search(r'(\d+)\s*(bài|post|blog|email|ad)', task.lower())
+    task_lower = task.lower()
+    # Ưu tiên: "tạo 3 hình ảnh", "3 ảnh", "3 images"
+    m = re.search(r'(\d+)\s*(?:hình\s*ảnh|ảnh|image)', task_lower)
     if m:
-        return min(int(m.group(1)), 5)
-    # Đếm số lần xuất hiện heading bài viết trong kết quả
-    headings = len(re.findall(r'(?:bài\s*\d+|##\s*bài|post\s*\d+)', final_text.lower()))
-    if headings > 0:
-        return min(headings, 5)
+        return min(int(m.group(1)), 3)
+    # Thứ hai: "3 bài", "2 post" (1 bài = 1 ảnh)
+    m = re.search(r'(\d+)\s*(?:bài|post|blog|email|ad)', task_lower)
+    if m:
+        return min(int(m.group(1)), 3)
     return 1  # mặc định 1 ảnh
 
 
