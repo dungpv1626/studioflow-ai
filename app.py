@@ -208,12 +208,52 @@ with tab1:
 
     if st.button("🚀 Chạy Orchestrator", type="primary", use_container_width=True, key="btn_orch"):
         if task_orch.strip():
-            with st.spinner("Đang xử lý..."):
+            with st.spinner("Đang xử lý... (có thể mất 3-5 phút nếu tạo ảnh)"):
                 from agents.orchestrator import run_orchestrator
-                result = run_agent_safe(run_orchestrator, task_orch)
+                orch_out = run_agent_safe(run_orchestrator, task_orch)
+
+            # run_orchestrator trả (text, images); run_agent_safe có thể trả str nếu exception
+            if isinstance(orch_out, tuple):
+                orch_text, orch_images = orch_out
+            else:
+                orch_text, orch_images = str(orch_out), []
+
             st.markdown("---")
             st.markdown("#### Kết quả")
-            st.markdown(result)
+            st.markdown(orch_text)
+
+            if orch_images:
+                st.markdown("---")
+                st.markdown("#### 🖼️ Hình ảnh đã tạo (có logo Studio Flow)")
+                img_cols = st.columns(min(len(orch_images), 3))
+                for i, item in enumerate(orch_images):
+                    preset     = item[0] if len(item) > 0 else "custom"
+                    local_path = item[1] if len(item) > 1 else ""
+                    image_url  = item[2] if len(item) > 2 else ""
+                    img_bytes  = item[3] if len(item) > 3 else None
+
+                    if not img_bytes and local_path:
+                        try:
+                            img_bytes = Path(local_path).read_bytes()
+                        except Exception:
+                            pass
+
+                    with img_cols[i % 3]:
+                        if img_bytes:
+                            st.image(img_bytes, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
+                            fname = Path(local_path).name if local_path else f"studioflow_{preset}_{i+1}.jpg"
+                            st.download_button(
+                                f"⬇️ Tải ảnh {i+1}",
+                                data=img_bytes,
+                                file_name=fname,
+                                mime="image/jpeg",
+                                key=f"orch_dl_{i}",
+                                use_container_width=True,
+                            )
+                        elif image_url:
+                            st.image(image_url, caption=f"Ảnh {i+1} · {preset}", use_container_width=True)
+                        else:
+                            st.warning(f"Không tải được ảnh {i+1}")
         else:
             st.warning("Vui lòng nhập yêu cầu")
 

@@ -50,17 +50,14 @@ ORCHESTRATOR_TOOLS = [
 ]
 
 
-def run_orchestrator(request: str) -> str:
+def run_orchestrator(request: str) -> tuple[str, list]:
     """
     Entry point chính — nhận bất kỳ request nào và tự phân công agent phù hợp.
-
-    Ví dụ request:
-    - "Chuẩn bị toàn bộ cho campaign ra mắt tính năng GPS tháng 5"
-    - "Tôi cần nội dung Facebook tuần này và phân tích tại sao user churn cao"
-    - "Tạo kịch bản KOL và brief cho 3 KOL micro trên TikTok"
+    Returns: (final_text, collected_images) — images từ content_agent được gom lại.
     """
     messages = [{"role": "user", "content": request}]
     initial_message = messages[0]
+    collected_images = []  # gom ảnh từ content_agent
 
     system = [
         {
@@ -120,7 +117,13 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
                     print(f"{'─'*40}")
 
                     if block.name == "run_content_agent":
-                        result = run_content_agent(block.input["task"])
+                        agent_out = run_content_agent(block.input["task"])
+                        if isinstance(agent_out, tuple):
+                            result_text_part, imgs = agent_out
+                            collected_images.extend(imgs)
+                            result = result_text_part
+                        else:
+                            result = agent_out
                     elif block.name == "run_kol_agent":
                         result = run_kol_agent(block.input["task"])
                     elif block.name == "run_business_analyst":
@@ -144,9 +147,9 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
 
     final_text = ""
     for block in response.content:
-        if hasattr(block, "text"):
+        if hasattr(block, "text") and block.text:
             final_text += block.text
-    return final_text
+    return final_text, collected_images
 
 
 if __name__ == "__main__":
@@ -159,5 +162,8 @@ if __name__ == "__main__":
             break
         if not user_input:
             continue
-        result = run_orchestrator(user_input)
-        print(f"\n{'='*60}\n[KẾT QUẢ]\n{result}\n{'='*60}\n")
+        result_text, result_imgs = run_orchestrator(user_input)
+        print(f"\n{'='*60}\n[KẾT QUẢ]\n{result_text}")
+        if result_imgs:
+            print(f"[IMAGES] {len(result_imgs)} ảnh đã tạo")
+        print(f"{'='*60}\n")
