@@ -123,9 +123,11 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
                         agent_out = run_content_agent(block.input["task"], on_progress=on_progress)
                         if isinstance(agent_out, tuple):
                             result_text_part, imgs = agent_out
-                            collected_images.extend(imgs)
+                            # Giới hạn tổng ảnh tối đa 3 dù content_agent được gọi nhiều lần
+                            slots_left = max(0, 3 - len(collected_images))
+                            collected_images.extend(imgs[:slots_left])
                             result = result_text_part
-                            _log(f"✓ Content Agent xong — {len(imgs)} ảnh")
+                            _log(f"✓ Content Agent xong — thêm {min(len(imgs), slots_left)}/{len(imgs)} ảnh")
                         else:
                             result = agent_out
                     elif block.name == "run_kol_agent":
