@@ -251,14 +251,20 @@ Quy tắc:
     preset = _pick_preset_for_task(task)
     n = _count_posts(task, final_text)
     auto_caption = _make_auto_caption(task)
-    _log(f"\n[Image] Bắt đầu tạo {n} ảnh (preset={preset})...")
+    aspect_ratio = IMAGE_PRESETS.get(preset, IMAGE_PRESETS["social_post"]).get("aspect_ratio", "1:1")
+
+    # Tạo n prompts khác nhau dựa trên nội dung thực tế (1 LLM call)
+    _log(f"\n[Image] Đang tạo {n} prompt ảnh dựa trên nội dung...")
+    image_prompts = _make_image_prompts(task, final_text, n)
+    for idx, ip in enumerate(image_prompts):
+        _log(f"[Image] Prompt {idx+1}: {ip[:80]}")
+
+    _log(f"[Image] Bắt đầu generate {n} ảnh (aspect={aspect_ratio})...")
 
     for i in range(n):
         try:
-            _log(f"[Image] Đang tạo ảnh {i+1}/{n} (preset={preset})...")
-            # Dùng generate_image_sync (sync httpx.Client) — tránh asyncio threading issues trên Streamlit Cloud
-            p = IMAGE_PRESETS.get(preset, IMAGE_PRESETS["social_post"])
-            result = generate_image_sync(p["prompt"], aspect_ratio=p.get("aspect_ratio", "1:1"))
+            _log(f"[Image] Đang tạo ảnh {i+1}/{n}...")
+            result = generate_image_sync(image_prompts[i], aspect_ratio=aspect_ratio)
             _log(f"[Image] Source: {result.get('source', '?')}")
             local_path = result.get("local_path", "")
             image_url = result.get("image_url", "")
@@ -297,20 +303,51 @@ Quy tắc:
     return final_text, collected_images
 
 
+def _make_image_prompts(task: str, final_text: str, n: int) -> list[str]:
+    """
+    Dùng LLM tạo n image prompts tiếng Anh từ nội dung thực tế (1 LLM call).
+    Trả danh sách n prompts, mỗi prompt cho 1 hình ảnh khác nhau.
+    """
+    # Lấy snippet nội dung để LLM hiểu context
+    content_snippet = final_text[:600] if final_text else task[:300]
+    try:
+        resp = _client.messages.create(
+            model=config.CLAUDE_DEFAULT_MODEL,
+            max_tokens=400,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Tạo ĐÚNG {n} image prompts tiếng Anh cho hình ảnh marketing Studio Flow.\n"
+                    f"Chủ đề nội dung: {task[:200]}\n"
+                    f"Nội dung bài viết (đầu): {content_snippet}\n\n"
+                    f"Yêu cầu mỗi prompt:\n"
+                    f"- Dưới 25 từ tiếng Anh\n"
+                    f"- Cảnh thực tế, người Việt Nam, studio chụp ảnh chuyên nghiệp\n"
+                    f"- Liên quan trực tiếp đến chủ đề bài viết\n"
+                    f"- Không giống nhau\n"
+                    f"- KHÔNG có text, logo, watermark trong ảnh\n\n"
+                    f"Trả về ĐÚNG {n} dòng, mỗi dòng 1 prompt, không đánh số, không giải thích."
+                ),
+            }],
+        )
+        lines = [l.strip() for l in resp.content[0].text.strip().split("\n") if l.strip()]
+        # Bổ sung nếu LLM trả thiếu
+        while len(lines) < n:
+            lines.append(lines[-1] if lines else "Vietnamese photography studio professional marketing image")
+        return lines[:n]
+    except Exception as e:
+        print(f"[Image prompts] LLM thất bại: {e}, dùng fallback prompt")
+        return [f"Vietnamese photography studio, professional marketing, {task[:60]}"] * n
+
+
 def _pick_preset_for_task(task: str) -> str:
-    """Chọn preset ảnh phù hợp dựa trên từ khoá trong task."""
+    """Chọn aspect ratio phù hợp dựa trên từ khoá trong task."""
     task_lower = task.lower()
-    if any(k in task_lower for k in ["hóa đơn", "invoice", "thanh toán"]):
-        return "feature_invoice"
-    if any(k in task_lower for k in ["lịch hẹn", "calendar", "lịch", "appointment"]):
-        return "feature_calendar"
-    if any(k in task_lower for k in ["kol", "tiktok", "reels", "video"]):
-        return "kol_product"
-    if any(k in task_lower for k in ["testimonial", "review", "đánh giá"]):
-        return "testimonial_bg"
-    if any(k in task_lower for k in ["banner", "website", "landing", "trang chủ"]):
-        return "hero_banner"
-    return "social_post"  # default
+    if any(k in task_lower for k in ["banner", "website", "landing", "trang chủ", "hero"]):
+        return "hero_banner"   # 16:9
+    if any(k in task_lower for k in ["kol", "tiktok", "reels", "story", "dọc"]):
+        return "kol_product"   # 9:16
+    return "social_post"       # 1:1 default
 
 
 def _make_auto_caption(task: str) -> str:
