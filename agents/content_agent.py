@@ -308,36 +308,69 @@ def _make_image_prompts(task: str, final_text: str, n: int) -> list[str]:
     Dùng LLM tạo n image prompts tiếng Anh từ nội dung thực tế (1 LLM call).
     Trả danh sách n prompts, mỗi prompt cho 1 hình ảnh khác nhau.
     """
-    # Lấy snippet nội dung để LLM hiểu context
     content_snippet = final_text[:600] if final_text else task[:300]
+    # Fallback variations — đảm bảo mỗi ảnh khác nhau dù LLM thất bại
+    _fallback_scenes = [
+        "Vietnamese photographer reviewing studio schedule on laptop, professional office",
+        "Happy couple at professional photography studio, modern interior, natural lighting",
+        "Studio owner checking invoice app on phone, modern workspace, clean desk",
+        "Photography equipment on display in Vietnamese studio, camera lenses, professional setup",
+        "Team meeting at photo studio, discussing marketing plans, bright modern office",
+    ]
+
     try:
         resp = _client.messages.create(
             model=config.CLAUDE_DEFAULT_MODEL,
-            max_tokens=400,
+            max_tokens=500,
             messages=[{
                 "role": "user",
                 "content": (
-                    f"Tạo ĐÚNG {n} image prompts tiếng Anh cho hình ảnh marketing Studio Flow.\n"
-                    f"Chủ đề nội dung: {task[:200]}\n"
-                    f"Nội dung bài viết (đầu): {content_snippet}\n\n"
-                    f"Yêu cầu mỗi prompt:\n"
-                    f"- Dưới 25 từ tiếng Anh\n"
-                    f"- Cảnh thực tế, người Việt Nam, studio chụp ảnh chuyên nghiệp\n"
-                    f"- Liên quan trực tiếp đến chủ đề bài viết\n"
-                    f"- Không giống nhau\n"
-                    f"- KHÔNG có text, logo, watermark trong ảnh\n\n"
-                    f"Trả về ĐÚNG {n} dòng, mỗi dòng 1 prompt, không đánh số, không giải thích."
+                    f"Create EXACTLY {n} different image prompts for Studio Flow marketing.\n"
+                    f"Topic: {task[:200]}\n"
+                    f"Content summary: {content_snippet[:400]}\n\n"
+                    f"Rules for each prompt:\n"
+                    f"- Under 25 English words\n"
+                    f"- Real scenes, Vietnamese people, professional photography studio context\n"
+                    f"- Directly related to the topic\n"
+                    f"- EACH prompt must be UNIQUELY different from the others\n"
+                    f"- NO text, logo, watermark in the image\n\n"
+                    f"Return EXACTLY {n} lines. One prompt per line. No numbers. No bullet points. No explanation."
                 ),
             }],
         )
-        lines = [l.strip() for l in resp.content[0].text.strip().split("\n") if l.strip()]
-        # Bổ sung nếu LLM trả thiếu
+        # Parse text từ response (không giả định content[0] là text)
+        text = ""
+        for block in resp.content:
+            if hasattr(block, "text") and block.text:
+                text = block.text.strip()
+                break
+
+        # Strip số thứ tự, bullet, dấu gạch đầu dòng
+        raw_lines = text.split("\n")
+        lines = []
+        for l in raw_lines:
+            l = l.strip()
+            if not l:
+                continue
+            # Bỏ prefix: "1. ", "- ", "• ", "* ", "1) " v.v.
+            import re as _re
+            l = _re.sub(r'^[\d]+[.)]\s*', '', l)
+            l = _re.sub(r'^[-•*]\s*', '', l).strip()
+            if len(l) > 10:
+                lines.append(l)
+
+        # Bổ sung nếu LLM trả thiếu — dùng fallback UNIQUE (không lặp)
+        i = 0
         while len(lines) < n:
-            lines.append(lines[-1] if lines else "Vietnamese photography studio professional marketing image")
+            lines.append(_fallback_scenes[i % len(_fallback_scenes)] + f", Studio Flow Vietnam")
+            i += 1
+
         return lines[:n]
+
     except Exception as e:
-        print(f"[Image prompts] LLM thất bại: {e}, dùng fallback prompt")
-        return [f"Vietnamese photography studio, professional marketing, {task[:60]}"] * n
+        print(f"[Image prompts] LLM thất bại: {e}, dùng fallback prompts unique")
+        # Fallback: n prompts KHÁC NHAU (không phải cùng 1 chuỗi × n)
+        return [_fallback_scenes[i % len(_fallback_scenes)] + f", Studio Flow Vietnam" for i in range(n)]
 
 
 def _pick_preset_for_task(task: str) -> str:
