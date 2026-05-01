@@ -137,7 +137,13 @@ Luôn bắt đầu bằng kế hoạch ngắn gọn: "Tôi sẽ giao task cho...
                         else:
                             result = agent_out
                     elif block.name == "run_kol_agent":
-                        result = run_kol_agent(block.input["task"])
+                        kol_out = run_kol_agent(block.input["task"], on_progress=on_progress)
+                        if isinstance(kol_out, tuple):
+                            result, kol_imgs = kol_out
+                            slots_left = max(0, 3 - len(collected_images))
+                            collected_images.extend(kol_imgs[:slots_left])
+                        else:
+                            result = kol_out
                     elif block.name == "run_business_analyst":
                         result = run_business_analyst_agent(block.input["task"])
                     else:

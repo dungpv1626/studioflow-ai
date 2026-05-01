@@ -437,19 +437,63 @@ with tab3:
 
     if st.button("🎬 Tạo kịch bản / Brief", type="primary", use_container_width=True, key="btn_kol"):
         if task_kol.strip():
-            with st.spinner("Đang tạo kịch bản..."):
+            if not os.getenv("GEMINI_API_KEY"):
+                st.error("❌ Chưa có GEMINI_API_KEY.")
+            else:
                 from agents.kol_agent import run_kol_agent
-                result = run_agent_safe(run_kol_agent, task_kol)
-            _save_history("🎬 KOL Agent", task_kol, result)
-            st.markdown("---")
-            st.markdown("#### Kết quả")
-            st.markdown(result)
-            st.download_button(
-                "💾 Tải xuống (.txt)",
-                data=result.encode("utf-8"),
-                file_name="kol_output.txt",
-                mime="text/plain",
-            )
+                log_box_kol = st.empty()
+                log_lines_kol = []
+
+                def on_progress_kol(msg):
+                    log_lines_kol.append(str(msg))
+                    log_box_kol.text("\n".join(log_lines_kol[-20:]))
+
+                with st.spinner("Đang tạo kịch bản + ảnh minh họa..."):
+                    try:
+                        kol_out = run_kol_agent(task_kol, on_progress=on_progress_kol)
+                    except Exception as _e:
+                        import traceback
+                        kol_out = (f"❌ Lỗi: {_e}\n\n```\n{traceback.format_exc()}\n```", [])
+
+                kol_text, kol_images = kol_out if isinstance(kol_out, tuple) else (str(kol_out), [])
+
+                if log_lines_kol:
+                    with st.expander("📋 Log chi tiết", expanded=False):
+                        st.text("\n".join(log_lines_kol))
+                log_box_kol.empty()
+
+                _save_history("🎬 KOL Agent", task_kol, kol_text, kol_images)
+                st.markdown("---")
+                st.markdown("#### Kết quả")
+                st.markdown(kol_text)
+
+                if kol_images:
+                    st.markdown("---")
+                    st.markdown("#### 🖼️ Ảnh minh họa")
+                    for i, item in enumerate(kol_images):
+                        img_bytes = item[3] if len(item) > 3 else None
+                        local_path = item[1] if len(item) > 1 else ""
+                        if not img_bytes and local_path:
+                            try:
+                                img_bytes = Path(local_path).read_bytes()
+                            except Exception:
+                                pass
+                        if img_bytes:
+                            st.image(img_bytes, use_container_width=True)
+                            st.download_button(
+                                f"⬇️ Tải ảnh minh họa",
+                                data=img_bytes,
+                                file_name=f"kol_visual_{i+1}.jpg",
+                                mime="image/jpeg",
+                                key=f"kol_dl_{i}",
+                            )
+
+                st.download_button(
+                    "💾 Tải xuống (.txt)",
+                    data=kol_text.encode("utf-8"),
+                    file_name="kol_output.txt",
+                    mime="text/plain",
+                )
         else:
             st.warning("Vui lòng nhập yêu cầu")
 

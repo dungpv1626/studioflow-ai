@@ -151,7 +151,7 @@ def _execute_kol_tool(tool_name: str, tool_input: dict) -> str:
     return f"Tool {tool_name} không được hỗ trợ"
 
 
-def run_kol_agent(task: str) -> str:
+def run_kol_agent(task: str, on_progress=None) -> tuple[str, list]:
     """
     Chạy KOL/KOC Campaign Agent.
 
@@ -162,6 +162,11 @@ def run_kol_agent(task: str) -> str:
     """
     messages = [{"role": "user", "content": task}]
     initial_message = messages[0]
+
+    def _log(msg):
+        print(msg)
+        if on_progress:
+            on_progress(msg)
 
     system = [
         {
@@ -177,7 +182,7 @@ Sau mỗi bước, báo cáo ngắn gọn những gì đã làm.
         }
     ]
 
-    print(f"\n[KOL Agent] Task: {task}\n")
+    _log(f"\n[KOL Agent] Task: {task}\n")
 
     MAX_ITERATIONS = 10
     iteration = 0
@@ -195,8 +200,8 @@ Sau mỗi bước, báo cáo ngắn gọn những gì đã làm.
         )
 
         for block in response.content:
-            if hasattr(block, "text"):
-                print(f"[Agent]: {block.text}")
+            if hasattr(block, "text") and block.text:
+                _log(f"[KOL]: {block.text[:200]}")
 
         if response.stop_reason == "end_turn":
             break
@@ -205,7 +210,7 @@ Sau mỗi bước, báo cáo ngắn gọn những gì đã làm.
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    print(f"\n[Tool] {block.name}...")
+                    _log(f"\n[Tool] {block.name}...")
                     result = _execute_kol_tool(block.name, block.input)
                     result_str = str(result)
                     if len(result_str) > 2000:
@@ -223,9 +228,39 @@ Sau mỗi bước, báo cáo ngắn gọn những gì đã làm.
 
     final_text = ""
     for block in response.content:
-        if hasattr(block, "text"):
+        if hasattr(block, "text") and block.text:
             final_text += block.text
-    return final_text
+
+    # Tạo 1 ảnh minh họa cho KOL content
+    collected_images = []
+    try:
+        from skills.image_generation import generate_image_sync
+        _log("\n[KOL Image] Đang tạo ảnh minh họa...")
+        # Prompt dựa trên task KOL
+        task_lower = task.lower()
+        if any(k in task_lower for k in ["tiktok", "reels", "short"]):
+            prompt = "Vietnamese KOL creator filming TikTok video in professional photography studio, ring light, smartphone, authentic lifestyle content"
+            ar = "9:16"
+        elif any(k in task_lower for k in ["youtube", "review"]):
+            prompt = "Vietnamese YouTuber doing product review in clean modern office setup, camera, laptop, professional lighting"
+            ar = "16:9"
+        elif any(k in task_lower for k in ["live", "facebook live"]):
+            prompt = "Vietnamese presenter doing Facebook Live stream, professional studio backdrop, camera, engaging with audience"
+            ar = "16:9"
+        else:
+            prompt = "Vietnamese photography studio owner showing app on phone, smiling, modern professional setting, natural lighting"
+            ar = "1:1"
+        result = generate_image_sync(prompt, aspect_ratio=ar, use_reference=False)
+        img_bytes = result.get("img_bytes")
+        if img_bytes:
+            collected_images.append(("kol_visual", result.get("local_path", ""), result.get("image_url", ""), img_bytes))
+            _log(f"[KOL Image] ✓ Ảnh minh họa ({result.get('source','?')}, {len(img_bytes)//1024}KB)")
+        else:
+            _log("[KOL Image] ✗ Không tạo được ảnh")
+    except Exception as _e:
+        _log(f"[KOL Image] ✗ Lỗi: {_e}")
+
+    return final_text, collected_images
 
 
 if __name__ == "__main__":
